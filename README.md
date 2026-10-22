@@ -24,8 +24,9 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 
 - `git submodule update --init` (or any build: `fetch_sources.sh` does it), then `./build.sh [board]` → `out/`.
 - `test/run_all.sh`: builds what is missing and runs all tests in parallel, one 86Box per core.
-- Where the bytes of a ROM go: `filelight out/size/<rom>` (each file is 1024 times its bytes in the ROM: Filelight's
-  MiB are KiB of ROM).
+- Where the bytes of a ROM go: `tools/filelight.sh [rom]` opens Filelight on a tree made in RAM (`/dev/shm`, removed
+  when Filelight closes): CBFS entry, source file, function or variable, each file 1024 times its bytes in the ROM
+  (Filelight counts 4 KiB disk blocks): its MiB are KiB of ROM.
 - `boards/<board>/run_86box.sh [rom]`: the board in the 86Box fork (Qt GUI).
 
 Licenses: the scripts, tests and documents here GPL-3.0 (`LICENSE`); the forks keep their projects' licenses

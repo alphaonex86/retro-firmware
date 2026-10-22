@@ -63,11 +63,10 @@ EOF
     || { tail -30 "$log"; echo "BUILD FAILED: $tag (log: $log)" >&2; exit 1; }
 }
 
-size_map() {  # tag, SeaBIOS name: where the bytes of out/<tag>.rom go, filelight out/size/<tag>
-  local obj=$nb/build/coreboot/$1 st=$nb/build/coreboot/$1/cbfs/fallback so=$nb/build/seabios/out-$2
-  "$nb/tools/rom_size_tree.py" "$out/$1.rom" "$obj/cbfstool" "$xgcc/i386-elf-nm" "$xgcc/i386-elf-objdump" "$out/size/$1" \
-    bootblock="$st/bootblock.debug" fallback/romstage="$st/romstage.debug" fallback/postcar="$st/postcar.debug" \
-    fallback/ramstage="$st/ramstage.debug" fallback/payload="$so/rom.o,$so/rom16.o@0xf0000"
+size_map() {  # tag, SeaBIOS name -> out/<tag>.size: the ELFs of the ROM's parts, for tools/filelight.sh
+  local st=$nb/build/coreboot/$1/cbfs/fallback so=$nb/build/seabios/out-$2
+  printf '%s\n' "bootblock=$st/bootblock.debug" "fallback/romstage=$st/romstage.debug" "fallback/postcar=$st/postcar.debug" \
+    "fallback/ramstage=$st/ramstage.debug" "fallback/payload=$so/rom.o,$so/rom16.o@0xf0000" > "$out/$1.size"
 }
 
 . "$bd/firmware.sh"
