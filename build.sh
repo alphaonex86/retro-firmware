@@ -3,8 +3,8 @@
 # build/<tree>/, the submodules stay clean, ROMs to out/. Each firmware base is a pair of submodules named after it
 # (coreboot-486 + seabios-486: the 486 trees of pc2005cz; a Socket 7 or Slot 1 board may use other ones).
 # The board's recipe, boards/<board>/firmware.sh, calls trees (its coreboot and SeaBIOS submodules), sets cb_mainboard
-# (its directory in <coreboot>/src/mainboard) and cb_config, then calls seabios, coreboot_build and size_map and lays
-# out its flash. usage: build.sh [board]   (default mb8433uud; the recipe documents its variables, e.g. DEBUG=1)
+# (its directory in <coreboot>/src/mainboard), cb_config and sb_configs (SeaBIOS config files), then calls seabios,
+# coreboot_build and size_map and lays out its flash. usage: build.sh [board]   (default mb8433uud; the recipe documents its variables, e.g. DEBUG=1)
 set -euo pipefail
 nb=$(dirname "$(readlink -f "$0")")
 board=${1:-mb8433uud}
@@ -36,7 +36,7 @@ seabios() {  # name, extra SeaBIOS config -> $(sb_out name)/bios.bcj.elf (x86 BC
   local so cfg log=$out/seabios-$1.build.log
   so=$(sb_out "$1") cfg=$(sb_out "$1").config
   fresh "$so" "$sb"
-  { cat "$cb/src/mainboard/$cb_mainboard/config_seabios" "$nb/seabios.config"; echo "$2"; } > "$cfg"
+  { cat "${sb_configs[@]}"; echo "$2"; } > "$cfg"
   local mk=(make -C "$sb" -s CROSS_PREFIX="$xgcc/i386-elf-" OUT="$so/" KCONFIG_CONFIG="$cfg")
   "${mk[@]}" olddefconfig > "$log" 2>&1
   "${mk[@]}" -j"$(nproc)" >> "$log" 2>&1 \
@@ -46,8 +46,9 @@ seabios() {  # name, extra SeaBIOS config -> $(sb_out name)/bios.bcj.elf (x86 BC
 
 # Same host-tool/warning workarounds as build_variants.sh (gcc>=15 host, author's %u for size_t).
 coreboot_build() {  # tag, SeaBIOS name, extra coreboot config -> $(cb_obj tag)/coreboot.rom
-  local tag=$1 cfg=$out/$1.config obj log=$out/$1.build.log
+  local tag=$1 cfg=$out/$1.config obj log=$out/$1.build.log elf=bios.bin.elf
   obj=$(cb_obj "$1")
+  [[ $3 == *CONFIG_PAYLOAD_BCJ_X86=y* ]] && elf=bios.bcj.elf   # the payload x86 BCJ filtered: the 486 tree undoes it
   fresh "$obj" "$cb"
   { cat "$cb_config"; cat <<EOF
 # CONFIG_DEBUG_HW_BREAKPOINTS is not set
@@ -58,9 +59,8 @@ coreboot_build() {  # tag, SeaBIOS name, extra coreboot config -> $(cb_obj tag)/
 CONFIG_DEFAULT_CONSOLE_LOGLEVEL_4=y
 # CONFIG_PAYLOAD_SEABIOS is not set
 CONFIG_PAYLOAD_ELF=y
-CONFIG_PAYLOAD_FILE="$(sb_out "$2")/bios.bcj.elf"
+CONFIG_PAYLOAD_FILE="$(sb_out "$2")/$elf"
 CONFIG_COMPRESSED_PAYLOAD_LZMA=y
-CONFIG_PAYLOAD_BCJ_X86=y
 CONFIG_POST_DEVICE=y
 CONFIG_POST_IO=y
 # CONFIG_DECOMPRESS_OFAST is not set

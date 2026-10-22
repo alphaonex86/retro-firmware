@@ -8,6 +8,7 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 |---|---|---|---|
 | [Biostar MB-8433UUD-A](boards/mb8433uud/README.md) | 486/Am5x86, UMC UM8881F + UM8886BF | mb-8433UUD (coreboot + SeaBIOS), flashed on the real board | `84xxuuda` |
 | [IBM Aptiva A90 (2168)](boards/aptiva2168/README.md) | Pentium P54C, OPTi Viper-M | not started (the IBM BIOS runs in 86Box) | `aptiva2168` |
+| [ASUS P3B-F](boards/p3bf/README.md) | Pentium II/III (Slot 1), Intel 440BX | mainline coreboot (asus/p2b) + SeaBIOS, 256 KiB | `p3bf` |
 
 ## Layout
 
@@ -19,14 +20,19 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
   | `86box` | [alphaonex86/86Box](https://github.com/alphaonex86/86Box) `retro` | 86Box v6.0 | every board (one machine each) |
   | `coreboot-486` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-486` | pc2005cz/coreboot_486 `486` | 486 boards |
   | `seabios-486` | [alphaonex86/seabios](https://github.com/alphaonex86/seabios) `retro-486` | pc2005cz/seabios_486 `486` | 486 boards |
+  | `coreboot-mainline` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-mainline` | coreboot 26.09 | Slot 1 / Socket 370 boards |
+  | `seabios-mainline` | [alphaonex86/seabios](https://github.com/alphaonex86/seabios) `retro-mainline` | SeaBIOS rel-1.17.0 | Slot 1 / Socket 370 boards |
   | `ipxe` | [alphaonex86/ipxe](https://github.com/alphaonex86/ipxe) `retro` | iPXE | network boot |
 
-  A board of another family (Socket 7, Socket 370/Slot 1) may need other coreboot/SeaBIOS bases: they become
-  submodules `coreboot-<base>` / `seabios-<base>` on branches `retro-<base>` of the same forks, and the board's
-  `firmware.sh` names its pair (`trees coreboot-<base> seabios-<base>`); each coreboot tree has its cross compiler.
+  Bases by family: 486 and Socket 7 (128 KiB flash, i586 at most: built for the i486 instruction set, i586 features
+  only after CPUID) use the 486 trees, the only coreboot cut to that size and with a cache-as-RAM that needs no MTRR;
+  Slot 1 / Socket 370 (256 KiB, P6) use mainline (i686, MTRR cache-as-RAM, the i440BX code and the ASUS P2B family;
+  without CPU microcode in CBFS to fit). Each base is a pair `coreboot-<base>` / `seabios-<base>` on branches
+  `retro-<base>` of the same forks; the board's `firmware.sh` names its pair (`trees ...`); each coreboot tree has
+  its own cross compiler (`tools/build_toolchain.sh <tree>`: mainline needs GCC 15).
   Change a fork with commits in its submodule, push its branch (pull requests to the upstream go from there), then
-  commit the new submodule pointer here. 86box, coreboot-486 and ipxe are shallow (only the pinned commit is
-  fetched); seabios-486 is not: its version string needs the tags.
+  commit the new submodule pointer here. 86box, the coreboot trees and ipxe are shallow (only the pinned commit
+  is fetched); the seabios trees are not: their version string needs the tags.
 - `boards/<board>/`: everything about one board: `firmware.sh` (its build recipe: firmware trees, coreboot mainboard,
   config, flash layout), `run_86box.sh` (its VM), `test/`, its documents and release scripts.
 - Shared: `build.sh [board]`, `build_86box.sh`, `fetch_sources.sh`, `seabios.config`, `tools/`, `test/` (`lib.sh`, and

@@ -7,6 +7,7 @@
 trees coreboot-486 seabios-486
 cb_mainboard=biostar/mb8433
 cb_config=$bd/coreboot.config
+sb_configs=("$cb/src/mainboard/$cb_mainboard/config_seabios" "$nb/seabios.config")
 
 # Headers shared by the setup utility (SeaBIOS) and coreboot: one copy in each tree, kept equal. The CMOS layout is
 # the same on every board (<coreboot>/src/include), the BIOS name and the POST code port are this board's.
@@ -48,7 +49,8 @@ halt=${HALT_ON:-0} tag=newbios
 [ "$halt" = 0 ] || tag=newbios-halt$halt
 # no coreboot log: its console alone takes 7 KB (13 KB with its messages), more than the flash has left; its POST codes
 # on COM1 time each step, and the debug ROM's SeaBIOS logs the chipset values coreboot set
-nolog="# CONFIG_CONSOLE_SERIAL is not set
+nolog="CONFIG_PAYLOAD_BCJ_X86=y
+# CONFIG_CONSOLE_SERIAL is not set
 # CONFIG_BOOTBLOCK_CONSOLE is not set
 # CONFIG_POSTCAR_CONSOLE is not set"
 seabios rel "CONFIG_NEWBIOS_HALT_ON=$halt"

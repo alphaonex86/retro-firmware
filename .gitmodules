@@ -17,3 +17,12 @@
 	url = https://github.com/alphaonex86/coreboot.git
 	branch = retro-486
 	shallow = true
+[submodule "coreboot-mainline"]
+	path = coreboot-mainline
+	url = https://github.com/alphaonex86/coreboot.git
+	branch = retro-mainline
+	shallow = true
+[submodule "seabios-mainline"]
+	path = seabios-mainline
+	url = https://github.com/alphaonex86/seabios.git
+	branch = retro-mainline
