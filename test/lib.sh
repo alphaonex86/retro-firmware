@@ -8,7 +8,7 @@ rom=${ROM:-$nb/out/newbios.rom}   # ROM=out/newbios-debug.rom for full COM1 logs
 vm_dir=$nb/test/vm/$(basename "$0" .sh)
 [ -x "$emu" ] || "$nb/build_86box.sh" > /dev/null
 
-fail() { echo "FAIL [$vm_name]: $*" >&2; [ -z "${vm:-}" ] || { echo "--- screen:"; cat "$vm/screen.txt" 2>/dev/null; } >&2; exit 1; }
+fail() { echo "FAIL [${vm_name:-$(basename "$0" .sh)}]: $*" >&2; [ -z "${vm:-}" ] || { echo "--- screen:"; cat "$vm/screen.txt" 2>/dev/null; } >&2; exit 1; }
 
 ram_cfg() {  # SIMM types of banks 0-3 (0 empty, see umc_hb4.c), L2 KB, L2 banks -> 86Box config lines
   printf '[UMC HB4(8881F)]\nbank0 = %s\nbank1 = %s\nbank2 = %s\nbank3 = %s\nl2_cache = %s\nl2_banks = %s\n' "$@"
