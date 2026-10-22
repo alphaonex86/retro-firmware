@@ -222,7 +222,8 @@ the original BIOS.
   `coreboot-486/src/include/` must stay equal: `firmware.sh` refuses otherwise).
   `test/images/usb.img.tar.xz` is the board's USB stick (LILO, Linux, FreeDOS in place of MS-DOS; sparse, 62 GB
   unpacked to ~150 MB) made by `test/images/make_usb_img.sh` from the HDD project; the tests unpack it when missing.
-- Where the bytes go: `tools/filelight.sh [rom]` (default `newbios`) opens Filelight on a tree made in RAM: CBFS
+- Where the bytes go: `tools/filelight.sh [rom]` (default `newbios`) opens Filelight on a tree made in RAM
+  (`/dev/shm/rom-size/<rom> (MiB = KiB)`): CBFS
   entry, source file, function or variable; each file is 1024 times its bytes in the ROM (Filelight counts 4 KiB disk
   blocks): read its MiB as KiB of ROM. Compressed entries are shared in proportion; `(strings)`, `(cbfs header)`,
   `(free)` as named (`tools/rom_size_tree.py`). Each CONFIG option that can be cut is a top-level directory

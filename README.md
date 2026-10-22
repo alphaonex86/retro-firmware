@@ -43,8 +43,8 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 
 - `git submodule update --init` (or any build: `fetch_sources.sh` does it), then `./build.sh [board]` → `out/`.
 - `test/run_all.sh`: builds what is missing and runs all tests in parallel, one 86Box per core.
-- Where the bytes of a ROM go: `tools/filelight.sh [rom]` opens Filelight on a tree made in RAM (`/dev/shm`, removed
-  when Filelight closes): CBFS entry, source file, function or variable, each file 1024 times its bytes in the ROM
+- Where the bytes of a ROM go: `tools/filelight.sh [rom]` opens Filelight on a tree made in RAM
+  (`/dev/shm/rom-size/<rom> (MiB = KiB)`, kept until the next run or a reboot): CBFS entry, source file, function or variable, each file 1024 times its bytes in the ROM
   (Filelight counts 4 KiB disk blocks): its MiB are KiB of ROM; each CONFIG option that can be cut (the setup tools
   `CONFIG_NEWBIOS_TOOL_*`, existing SeaBIOS options) is a top-level directory of what it saves.
 - What each CONFIG option saves, as a table: `tools/option_sizes.sh [rom [option...]]` (one SeaBIOS build per option).

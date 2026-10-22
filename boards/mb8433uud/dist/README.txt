@@ -5,7 +5,7 @@ An open replacement BIOS for the Biostar MB-8433UUD-A (UMC UM8881F/UM8886BF chip
 CPUs): coreboot (coreboot_486) for the chipset, SeaBIOS for the PC BIOS services, and an Award-like
 setup utility with diagnostics and benchmarks. Runs DOS and Linux.
 
-Sources, build, tests: https://github.com/alphaonex86/mb-8433UUD-A-BIOS
+Sources, build, tests: https://github.com/alphaonex86/retro-firmware (boards/mb8433uud)
 
 
 Contents

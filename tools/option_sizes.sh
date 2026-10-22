@@ -65,7 +65,9 @@ for o in "${opts[@]}"; do
   variant "$o" &
 done
 wait
-: > "$list"
+part=.part   # the list and table replace the old ones only once complete
+[ "$list" != /dev/null ] || part=
+: > "$list$part"
 row() {  # option -> its table line
   local name=CONFIG_$1 payload free
   [ "$1" = all ] && name="CONFIG_NEWBIOS_TOOL_*, all"
@@ -76,7 +78,7 @@ row() {  # option -> its table line
     printf '%-36s %14s\n' "$name" "does not fit"
   else
     printf '%-36s %14d %14d\n' "$name" $((base_payload - payload)) $((free - base_free))
-    [ "$1" = all ] || echo "CONFIG_$1 ${so%/*}/out-off-$1 $((base_payload - payload))" >> "$list"
+    [ "$1" = all ] || echo "CONFIG_$1 ${so%/*}/out-off-$1 $((base_payload - payload))" >> "$list$part"
   fi
 }
 {
@@ -84,4 +86,5 @@ row() {  # option -> its table line
   for o in "$@"; do [ "$o" = all ] || row "$o"; done | sort -k2,2nr
   row all
   echo "out/$rom.rom: payload $base_payload bytes (LZMA), free $base_free bytes"
-} | tee "$table"
+} | tee "$table$part"
+[ -z "$part" ] || { mv "$list.part" "$list"; mv "$table.part" "$table"; }
