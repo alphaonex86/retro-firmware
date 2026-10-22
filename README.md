@@ -192,6 +192,10 @@ the original BIOS.
   `coreboot/src/mainboard/biostar/mb8433/` must stay equal: `build.sh` refuses otherwise).
   `test/images/usb.img.tar.xz` is the board's USB stick (LILO, Linux, FreeDOS in place of MS-DOS; sparse, 62 GB
   unpacked to ~150 MB) made by `test/images/make_usb_img.sh` from the HDD project; the tests unpack it when missing.
+- Where the bytes go: each ROM built gets `out/size/<rom>/`, a tree to open with Filelight (`filelight
+  out/size/newbios`): CBFS entry, source file, function or variable; each file is 1024 times its bytes in the ROM
+  (Filelight counts 4 KiB disk blocks): read its MiB as KiB of ROM. Compressed entries are shared in proportion;
+  `(strings)`, `(cbfs header)`, `(free)` as named (`tools/rom_size_tree.py`).
 - Host: a Linux with gcc, make, git, curl, python3, unzip, nasm (tests), cmake and Qt6 (86Box GUI).
 
 ## Tests (86Box fork)

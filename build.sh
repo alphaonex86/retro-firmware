@@ -77,6 +77,10 @@ EOF
     fi || { echo "BUILD FAILED: $tag, no room for ${f%%=*}" >&2; exit 1; }
   done
   "${cbfs[@]}" print > "$out/$tag.cbfs.txt"
+  local st=$obj/cbfs/fallback so=$nb/build/seabios/out-$2   # where the bytes go: filelight out/size/<rom>
+  "$nb/tools/rom_size_tree.py" "$rom" "$obj/cbfstool" "$xgcc/i386-elf-nm" "$xgcc/i386-elf-objdump" "$out/size/$tag" \
+    bootblock="$st/bootblock.debug" fallback/romstage="$st/romstage.debug" fallback/postcar="$st/postcar.debug" \
+    fallback/ramstage="$st/ramstage.debug" fallback/payload="$so/rom.o,$so/rom16.o@0xf0000"
   [ "$(awk '$1 == "escd" {print $2}' "$out/$tag.cbfs.txt")" = 0x1bfe0 ] \
     || { echo "BUILD FAILED: $tag, the ESCD data is not at flash 0x1c000" >&2; exit 1; }   # 32-byte header
   echo "$out/$tag.rom: $(awk '/empty/ {s += $4} END {print s}' "$out/$tag.cbfs.txt") bytes free"
