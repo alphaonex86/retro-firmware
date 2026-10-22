@@ -10,10 +10,6 @@ mkdir -p "$vm_dir"
 usb_stick "$vm_dir/usb.img"
 export BOX86_USB_DISK=$vm_dir/usb.img BOX86_USB_KBD=1 BOX86_KBD_ABSENT=1
 key() { vm_cmd usbkey "$@"; }
-wait_gone() {  # regex, timeout: the screen no longer shows it
-  local end=$((SECONDS + $2))
-  while vm_screen; grep -Eq "$1" "$vm/screen.txt"; do [ $SECONDS -lt $end ] || fail "still on screen: /$1/"; sleep 0.3; done
-}
 main="SAVE & EXIT SETUP"
 
 vm_start nokbd "$rom" ""
@@ -29,8 +25,7 @@ for entry in "0 STANDARD CMOS SETUP" "1 BIOS FEATURES SETUP" "2 CHIPSET FEATURES
   read -r i title <<< "$entry"
   for ((; sel < i; sel++)); do key 51; done         # down
   key 28                                            # Enter
-  wait_gone "$main" 10
-  vm_expect "$title"
+  vm_wait_text "$title" 10                          # not wait_gone: a menu redraw also hides $main a moment
   key 29                                            # ESC
   vm_wait_text "$main" 10
 done
