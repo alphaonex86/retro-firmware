@@ -11,10 +11,13 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 
 ## Layout
 
-- Submodules, each a fork with our commits on branch `retro` over the pinned upstream: `86box` (86Box v6.0),
-  `coreboot` (pc2005cz/coreboot_486), `seabios` (pc2005cz/seabios_486), `ipxe`. Their origins are the bare
-  repositories in `/mnt/data/perso/retro/git/`. Change them there with commits, then commit the new submodule
-  pointer here.
+- Submodules, each a GitHub fork with our commits on branch `retro` over the pinned upstream:
+  [alphaonex86/86Box](https://github.com/alphaonex86/86Box) (86Box v6.0),
+  [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) (pc2005cz/coreboot_486, branch 486),
+  [alphaonex86/seabios_486](https://github.com/alphaonex86/seabios_486) (pc2005cz/seabios_486, branch 486),
+  [alphaonex86/ipxe](https://github.com/alphaonex86/ipxe). Change a fork with commits in its submodule, push its
+  `retro` (pull requests to the upstream go from there), then commit the new submodule pointer here. 86box,
+  coreboot and ipxe are shallow (only the pinned commit is fetched); seabios is not: its version needs the tags.
 - `boards/<board>/`: everything about one board: `firmware.sh` (its build recipe: coreboot mainboard, config, flash
   layout), `run_86box.sh` (its VM), `test/`, its documents and release scripts.
 - Shared: `build.sh [board]`, `build_86box.sh`, `fetch_sources.sh`, `seabios.config`, `tools/`, `test/` (`lib.sh`, and

@@ -1,16 +1,19 @@
 [submodule "86box"]
 	path = 86box
-	url = /mnt/data/perso/retro/git/86Box.git
+	url = https://github.com/alphaonex86/86Box.git
 	branch = retro
+	shallow = true
 [submodule "coreboot"]
 	path = coreboot
-	url = /mnt/data/perso/retro/git/coreboot.git
+	url = https://github.com/alphaonex86/coreboot.git
 	branch = retro
+	shallow = true
 [submodule "seabios"]
 	path = seabios
-	url = /mnt/data/perso/retro/git/seabios.git
+	url = https://github.com/alphaonex86/seabios_486.git
 	branch = retro
 [submodule "ipxe"]
 	path = ipxe
-	url = /mnt/data/perso/retro/git/ipxe.git
+	url = https://github.com/alphaonex86/ipxe.git
 	branch = retro
+	shallow = true
