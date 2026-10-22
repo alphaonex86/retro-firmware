@@ -21,8 +21,8 @@ rm -f "$out"/*.o
 
 car=()
 for opt in CONFIG_DCACHE_RAM_BASE CONFIG_DCACHE_RAM_SIZE; do
-  value=$(sed -n "s/^$opt=//p" "$nb/configs/mb8433_author.config")
-  [ -n "$value" ] || { echo "FAIL [dramfuzz]: no $opt in configs/mb8433_author.config"; exit 1; }
+  value=$(sed -n "s/^$opt=//p" "$nb/boards/mb8433uud/coreboot.config")
+  [ -n "$value" ] || { echo "FAIL [dramfuzz]: no $opt in boards/mb8433uud/coreboot.config"; exit 1; }
   car+=("-D$opt=$value")
 done
 sections=(-ffunction-sections -fdata-sections)   # only what is reached is linked (--gc-sections)

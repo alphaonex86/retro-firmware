@@ -9,15 +9,16 @@
 # usage: run_86box.sh [rom]   default out/newbios-2mbit.rom, rebuilt if a source changed; a 128 KiB ROM (e.g.
 #        BIOSORIGINAL.bin, the original BIOS) runs on the board's 1 Mbit Intel chip
 set -euo pipefail
-nb=$(dirname "$(readlink -f "$0")")
+bd=$(dirname "$(readlink -f "$0")")
+nb=$(dirname "$(dirname "$bd")")
 . "$nb/test/lib.sh"
-vm=$nb/vm
+vm=$bd/vm
 rom=$(readlink -f "${1:-$nb/out/newbios-2mbit.rom}")
 GUI=1 "$nb/build_86box.sh" > /dev/null
-sources=("$nb/build.sh" "$nb/seabios.config" "$nb/configs/mb8433_author.config"
+sources=("$nb/build.sh" "$bd/firmware.sh" "$nb/seabios.config" "$bd/coreboot.config"
          "$nb/seabios/src" "$nb/seabios/Makefile" "$nb/coreboot/src")
 if [ $# -eq 0 ] && { [ ! -f "$rom" ] || [ -n "$(find "${sources[@]}" -newer "$rom" -print -quit)" ]; }; then
-  "$nb/build.sh" > /dev/null   # the ROM is missing or older than one of its sources
+  "$nb/build.sh" mb8433uud > /dev/null   # the ROM is missing or older than one of its sources
 fi
 [ -f "$nb/build/bzImage" ] || "$nb/test/linux/build.sh"
 

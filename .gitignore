@@ -2,13 +2,15 @@
 /sources/
 /build/
 /out/
-# Local VMs (run_86box.sh, tests)
-/vm/
+# Local VMs (boards/*/run_86box.sh, tests)
+/boards/*/vm/
 /test/vm/
 # Unpacked by the tests from test/images/usb.img.tar.xz
 /test/images/usb.img
 /test/images/.unpack.*
-# Not redistributable: the board's original Award BIOS dump; the operator's NIC EEPROM (its MAC address)
+# Not redistributable: the original BIOS dumps (MB-8433UUD-A's Award at the root, the others in their board);
+# the operator's NIC EEPROM (its MAC address)
 /BIOSORIGINAL.bin
+/boards/*/BIOSORIGINAL.bin
 /test/roms/rtl8139-operator-eeprom.txt
 __pycache__/

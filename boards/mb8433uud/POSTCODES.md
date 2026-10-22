@@ -9,7 +9,7 @@ Both also send each code from coreboot's C stages and SeaBIOS on COM1 (115200 8N
 on a PC with a null-modem cable, `tools/post_time.py /dev/ttyUSB0` prints each with its time (the
 board has no clock to time its POST itself).
 
-In 86Box the POST card is on in `run_86box.sh` (codes in the status bar) and in the tests
+In 86Box the POST card is on in `boards/mb8433uud/run_86box.sh` (codes in the status bar) and in the tests
 (`BOX86_POSTLOG`). `test/post.sh` checks that a boot sends exactly the "Normal boot" codes below, in
 this order, so this table is the reference.
 

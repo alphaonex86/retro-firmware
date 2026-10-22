@@ -12,7 +12,7 @@ mkdir -p "$out"
 
 defs=()
 for opt in PIRQ_ROUTE DEBUG_PIRQ GENERATE_PIRQ_TABLE MAX_PIRQ_LINKS IRQ_SLOT_COUNT; do
-  value=$(sed -n "s/^CONFIG_$opt=//p" "$nb/configs/mb8433_author.config")
+  value=$(sed -n "s/^CONFIG_$opt=//p" "$nb/boards/mb8433uud/coreboot.config")
   case "$value" in y) value=1 ;; "") value=0 ;; esac
   defs+=("-DCONFIG_$opt=$value")
 done

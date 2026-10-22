@@ -277,7 +277,7 @@ SeaBIOS:
 ### Configuration and scripts (not firmware code)
 
 - Kconfig files (`src/**/Kconfig`, SeaBIOS `src/Kconfig`) and `Makefile.inc` lists.
-- `configs/mb8433_author.config` and `mb-8433UUD-A-BIOS/seabios.config`, combined by `mb-8433UUD-A-BIOS/build.sh`. 
+- `boards/mb8433uud/coreboot.config` and `seabios.config`, combined by `build.sh` and `boards/mb8433uud/firmware.sh`.
 - `seabios/src/newbios_cmos.h` (the CMOS map shared by SeaBIOS and coreboot) is C.
 
 ## 7. Oddities found while commenting

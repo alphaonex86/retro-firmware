@@ -1,10 +1,10 @@
 #!/bin/bash
 # POST codes on port 80h (fork POST card log): a boot without disk sends exactly the "Normal boot" codes
-# of POSTCODES.md in order, setup and its memory test send theirs, the failed boot ends with BD. COM1 gets
+# of boards/mb8433uud/POSTCODES.md in order, setup and its memory test send theirs, the failed boot ends with BD. COM1 gets
 # them too (post_serial.h, for timing a real board): every SeaBIOS one, and coreboot's C ones in order.
 . "$(dirname "$0")/lib.sh"
 mkdir -p "$vm_dir"
-normal=$(sed -n '/^## Normal boot/,/^## Other/p' "$nb/POSTCODES.md" | grep -oE '^\| `[0-9A-F]{2}`' | grep -oE '[0-9A-F]{2}')
+normal=$(sed -n '/^## Normal boot/,/^## Other/p' "$nb/boards/mb8433uud/POSTCODES.md" | grep -oE '^\| `[0-9A-F]{2}`' | grep -oE '[0-9A-F]{2}')
 codes() { grep -E '^[0-9A-F]{2}$' "$vm/post.log" | uniq | tr '\n' ' ' | sed 's/ $//'; }
 vm_start post "$rom"
 vm_end_of_post 60
