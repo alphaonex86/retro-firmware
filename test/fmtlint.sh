@@ -3,7 +3,7 @@
 # precision, pads numbers only and knows d u p x X c s % and "%.s". devfuzz runs that engine but only on the
 # paths its cases reach; this checks every format (the USB page showed "%*sS f6075:..." on the board).
 nb=$(dirname "$(dirname "$(readlink -f "$0")")")
-python3 - "$nb/build/seabios/src" <<'PY'
+python3 - "$nb/seabios/src" <<'PY'
 import os, re, sys
 bad = []
 lit = re.compile(r'"((?:[^"\\\n]|\\.)*)"')

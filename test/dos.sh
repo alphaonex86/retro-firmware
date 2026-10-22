@@ -19,7 +19,7 @@ b5 "Detecting HDD Primary Master +\.\.\. 86B_HD"        # POST screen: board, re
 b5 "^Biostar MB-8433UUD-A"
 b5 "^[0-3][0-9]/[01][0-9]/20[0-9]{2} "
 b5 "Detecting HDD Primary Slave +\.\.\. None"
-b5 "^rel-[^ ]*-[0-9]{8}_[0-9]{6} "                       # SeaBIOS version and build time, nothing after
+b5 "^rel-[0-9.]+-[0-9]+-g[0-9a-f]+(-dirty-[0-9]{8}_[0-9]{6})? "   # SeaBIOS version: its commit (+ build time if dirty)
 vm_end_of_post
 vm_wait_text "DOS-TEST-OK" 90
 expect_bits "$(vm_cr0)" 0x60000000 0 "L1 cache enabled in DOS (CR0.CD, NW)"

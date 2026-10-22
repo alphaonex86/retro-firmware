@@ -6,17 +6,18 @@
 # in 1 or 2 banks, random power-on contents, fake data SRAM and/or tag RAM; setup option, CMOS validity and
 # unfinished-POST guard). Also checks the register fields
 # against the oracle lines of test/ram.sh and the original BIOS's values measured on a real board.
-# usage: [SEABIOS=tree] dramfuzz.sh   (default tree build/seabios; failing cases: test/vm/dramfuzz/failures.txt)
+# usage: [SEABIOS=tree] dramfuzz.sh   (default tree: the seabios submodule, built in build/seabios/out-rel; failing cases: test/vm/dramfuzz/failures.txt)
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
-cb=$nb/sources/coreboot_486/src
+cb=$nb/coreboot/src
 um=$cb/northbridge/umc/um8881
-sb=${SEABIOS:-$nb/build/seabios}
+sb=${SEABIOS:-$nb/seabios}
+sbout=${SEABIOS_OUT:-$nb/build/seabios/out-rel}
 out=$here/vm/dramfuzz
 mkdir -p "$out"
 rm -f "$out"/*.o
-[ -f "$sb/out-rel/autoconf.h" ] || { echo "FAIL [dramfuzz]: no SeaBIOS build in $sb (run build.sh)"; exit 1; }
+[ -f "$sbout/autoconf.h" ] || { echo "FAIL [dramfuzz]: no SeaBIOS build in $sb (run build.sh)"; exit 1; }
 
 car=()
 for opt in CONFIG_DCACHE_RAM_BASE CONFIG_DCACHE_RAM_SIZE; do
@@ -34,7 +35,7 @@ for src in "$here/native/um8881_model.c" "$here/native/dramfuzz.c"; do
 done
 # setup.c as devfuzz.sh compiles it (test/native/seabios/seam.h), its asm l2_fill weakened for the model's
 gcc -m32 -O1 -fno-pie "${sections[@]}" -ffreestanding -fno-builtin -fno-strict-aliasing -fno-delete-null-pointer-checks \
-  -DMODE16=0 -DMODESEGMENT=0 -iquote "$sb/out-rel" -iquote "$sb/src" -I"$here/native/seabios" \
+  -DMODE16=0 -DMODESEGMENT=0 -iquote "$sbout" -iquote "$sb/src" -I"$here/native/seabios" \
   -include "$here/native/seabios/seam.h" -w -c "$here/native/seabios_l2.c" -o "$out/seabios_l2.o"
 objcopy --weaken-symbol=l2_fill --weaken-symbol=l2_line_works --weaken-symbol=l2_caches "$out/seabios_l2.o"
 gcc -m32 -no-pie -Wl,--gc-sections "$out"/*.o -o "$out/dramfuzz"

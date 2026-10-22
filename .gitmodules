@@ -1,0 +1,16 @@
+[submodule "86box"]
+	path = 86box
+	url = /mnt/data/perso/retro/git/86Box.git
+	branch = retro
+[submodule "coreboot"]
+	path = coreboot
+	url = /mnt/data/perso/retro/git/coreboot.git
+	branch = retro
+[submodule "seabios"]
+	path = seabios
+	url = /mnt/data/perso/retro/git/seabios.git
+	branch = retro
+[submodule "ipxe"]
+	path = ipxe
+	url = /mnt/data/perso/retro/git/ipxe.git
+	branch = retro

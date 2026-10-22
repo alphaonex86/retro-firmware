@@ -6,26 +6,27 @@
 # or lying IDE drives, floppy controllers, PCI devices and option ROMs, ISA ROMs and PnP cards, USB
 # controllers and devices, corrupt CMOS, flash chips and ESCDs. Each case runs in its own process; it must not crash, hang
 # (virtual time budget, CPU loop) or misbehave (checks per area).
-# usage: [SEABIOS=tree] devfuzz.sh   (default tree build/seabios; failing cases: test/vm/devfuzz/failures.txt;
+# usage: [SEABIOS=tree] devfuzz.sh   (default tree: the seabios submodule, built in build/seabios/out-rel; failing cases: test/vm/devfuzz/failures.txt;
 #        rerun one with a stack trace: test/vm/devfuzz/devfuzz -v area index; one area: devfuzz -a area)
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
-sb=${SEABIOS:-$nb/build/seabios}
+sb=${SEABIOS:-$nb/seabios}
+sbout=${SEABIOS_OUT:-$nb/build/seabios/out-rel}
 src=$here/native/seabios
 out=$here/vm/devfuzz
 mkdir -p "$out"
 
-[ -f "$sb/out-rel/autoconf.h" ] && [ -f "$sb/out-rel/rom.o" ] \
+[ -f "$sbout/autoconf.h" ] && [ -f "$sbout/rom.o" ] \
   || { echo "FAIL [devfuzz]: no SeaBIOS build in $sb (run build.sh)"; exit 1; }
-rom_max=$(nm "$sb/out-rel/rom.o" | awk '$3 == "final_readonly_start" {print "0x" $1}')
+rom_max=$(nm "$sbout/rom.o" | awk '$3 == "final_readonly_start" {print "0x" $1}')
 [ -n "$rom_max" ] || { echo "FAIL [devfuzz]: final_readonly_start not in $sb/out-rel/rom.o"; exit 1; }
 
 # shift-base: GCC defines shifting into the sign bit, SeaBIOS relies on it
 common=(-m32 -O1 -g -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined
         -fno-sanitize=null,alignment,pointer-overflow,shift-base -fno-sanitize-recover=all -I"$src")
 seabios=("${common[@]}" -ffreestanding -fno-builtin -fno-strict-aliasing -fno-delete-null-pointer-checks
-         -DMODE16=0 -DMODESEGMENT=0 -DFUZZ_ROM_MAX="$rom_max" -DPNP_FLASH_BASE=0x60000000u -DFLASH_LOW_BASE=0x61000000u -iquote "$sb/out-rel" -iquote "$sb/src"
+         -DMODE16=0 -DMODESEGMENT=0 -DFUZZ_ROM_MAX="$rom_max" -DPNP_FLASH_BASE=0x60000000u -DFLASH_LOW_BASE=0x61000000u -iquote "$sbout" -iquote "$sb/src"
          -include "$src/seam.h")
 objs=() pids=()
 compile() {  # object, source, flags...

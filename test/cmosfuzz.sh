@@ -6,7 +6,7 @@
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
-cb=$nb/sources/coreboot_486/src
+cb=$nb/coreboot/src
 out=$here/vm/cmosfuzz
 mkdir -p "$out"
 

@@ -113,7 +113,7 @@ mode (the original BIOS leaves them untouched in 86Box). CHS-only drives (no LBA
 
 CMOS: AT standard bytes 10h-2Dh (floppy types, equipment, memory sizes, checksum) plus the mb-8433UUD block
 from 40h (one nibble per setting, password hash at 78h, signature 7Bh, checksum 7Ch, unfinished-POST
-counter 7Eh), defined in `cmos.h` and shared by SeaBIOS and coreboot. A cleared or Award CMOS loads
+counter 7Eh), defined in `seabios/src/newbios_cmos.h` and shared by SeaBIOS and coreboot. A cleared or Award CMOS loads
 defaults.
 
 Not implemented from the Award pages (no effect possible or not needed): virus warning, boot up floppy
@@ -174,24 +174,24 @@ the original BIOS.
 - `./build.sh` → `out/newbios.rom` (1 Mbit flash, and 86Box) and `out/newbios-2mbit.rom` (2 Mbit flash, e.g. a W49F002A: the board's 1 Mbit socket keeps its A17 high, only the upper 128 KiB is reached; the BIOS is in both halves). The 86Box fork emulates the board's Intel 28F001BX-T flash (`BOX86_FLASH=w29c010` for the old Winbond), with WE# gated by UM8886 IBC47 bit 6 and `BOX86_FLASH_VPP=5` for JP13 at 5 V. `HALT_ON=1` builds `out/newbios-halt1.rom`, whose Halt On default is No Errors: POST errors (e.g. a dead CMOS battery, no keyboard) print a WARNING and the boot continues. The SeaBIOS payload is x86 BCJ filtered before LZMA (`tools/bcj_x86.py`, undone by coreboot's loader). `DEBUG=1` adds
   `out/newbios-debug.rom` (SeaBIOS level 1 log on COM1; no coreboot log: it does not fit).
 - Network boot tests: `tools/build_ipxe.sh` builds the PXE program Etherboot loads, iPXE's realtek driver with the
-  10ec:8039 clone added (`patches/ipxe.patch`, config `configs/ipxe`), as `build/ipxe-chain.pxe`; it runs the
+  10ec:8039 clone added (`ipxe` submodule, config `configs/ipxe`), as `build/ipxe-chain.pxe`; it runs the
   test's `boot.ipxe` from the TFTP server.
 - The 86Box fork also models the UM8881 L2 in normal mode until it is coherent with DRAM (random power-on
   tags, data and dirty bits, no valid bit, write-through/write-back; hypothesis: with a size programmed it
   fills lines even with 50h bit 7 clear), the RTL8139 PCI device ID (`device_id`) and a plain RTL8139C (`cplus = 0`),
   an Am5x86 at 3 x 40 MHz, LAN background broadcasts (`BOX86_NET_NOISE_MS`), key combinations in the test control (`combo`), the board's VIA VT6212 USB card (2 UHCI + EHCI, port handoff to the companions) with a low-speed keyboard and a high-speed disk (`BOX86_USB_KBD`, `BOX86_USB_DISK`, `usbkey`), port 92h without reset as on the real board, the Intel flash above, a W49F002A 2 Mbit flash (`BOX86_FLASH=w49f002a`, 256 KiB image) with A17 kept high as in the board's 1 Mbit
   socket (its lower half unreachable), and the power-on time of the 8042 and keyboard.
-- Sources: `fetch_sources.sh` (run by the builds) downloads the pinned trees and tarballs into `sources/`:
-  the 486 coreboot and SeaBIOS of their author, [pc2005cz/coreboot_486](https://github.com/pc2005cz/coreboot_486)
-  and [pc2005cz/seabios_486](https://github.com/pc2005cz/seabios_486); for the tests iPXE, 86Box 6.0,
-  FreeDOS 1.3 and Linux 6.18. `tools/build_toolchain.sh` builds coreboot's i386 cross compiler once (it
-  downloads GCC and binutils). `sources/coreboot_486` is patched in place (`patches/coreboot.patch`),
-  `build/seabios` is a clone of `sources/seabios_486` + `patches/seabios.patch`; SeaBIOS options in
-  `seabios.config`, coreboot options in `configs/mb8433_author.config` + `build.sh`, CMOS layout `cmos.h`.
+- Sources: the forks are submodules, each a git repository whose branch `retro` holds our commits on the pinned
+  upstream: `coreboot` and `seabios` on the 486 trees of their author,
+  [pc2005cz/coreboot_486](https://github.com/pc2005cz/coreboot_486) and
+  [pc2005cz/seabios_486](https://github.com/pc2005cz/seabios_486); `86box` on 86Box v6.0; `ipxe`. Builds go to
+  `build/`, the submodules stay clean. `fetch_sources.sh` (run by the builds) checks them out and downloads the
+  tarballs of the tests into `sources/`: FreeDOS 1.3, Linux 6.18. `tools/build_toolchain.sh` builds coreboot's
+  i386 cross compiler once (it downloads GCC and binutils). SeaBIOS options in `seabios.config`, coreboot options
+  in `configs/mb8433_author.config` + `build.sh`, CMOS layout `seabios/src/newbios_cmos.h` (the copy in
+  `coreboot/src/mainboard/biostar/mb8433/` must stay equal: `build.sh` refuses otherwise).
   `test/images/usb.img.tar.xz` is the board's USB stick (LILO, Linux, FreeDOS in place of MS-DOS; sparse, 62 GB
   unpacked to ~150 MB) made by `test/images/make_usb_img.sh` from the HDD project; the tests unpack it when missing.
-  The patches are the source of truth: missing trees are recreated from them and they are re-exported
-  after each build.
 - Host: a Linux with gcc, make, git, curl, python3, unzip, nasm (tests), cmake and Qt6 (86Box GUI).
 
 ## Tests (86Box fork)
@@ -251,7 +251,7 @@ come from the target directory of the coreboot_486 author's
 dump of the board's original BIOS, not included); `award_findings.md` is what reading that image taught; `test/oracle/ram.sh <config>` prints
 what the original BIOS and mb-8433UUD find on one SIMM/L2 configuration, as a `test/ram.sh` line.
 
-86Box fork (`build_86box.sh`, `patches/86box.patch` on 86Box 6.0): test control FIFO
+86Box fork (`build_86box.sh`, `86box` submodule on 86Box 6.0): test control FIFO
 (`$BOX86_TESTCTL`: `key`, `text`, `pci`, `in`, `out`, `cr0`, `shot` (PNG screenshot), `rtcadd` (RTC forward), `reset`, `quit`); POST card
 log (`$BOX86_POSTLOG`); RTL8139 boot ROM socket
 (`roms/network/rtl8139c/rtl8139c.rom`) and MMIO BAR mapped whatever the order of BAR/command writes; PCI
@@ -272,7 +272,7 @@ configurations the original BIOS gets the same sizes and register fields as mb-8
 
 ## Changes to the upstream trees
 
-SeaBIOS (`patches/seabios.patch`): setup utility, POST screen and memory test (`src/setup.c`); CMOS boot
+SeaBIOS (`seabios` submodule): setup utility, POST screen and memory test (`src/setup.c`); CMOS boot
 order, prompt delay, password; floppy types and swap; ATA: CHS-only drives, PIO mode per drive with
 UM8886BF timings, drive type None, 32-bit transfer switch, standby timer; translation from setup; APM
 switch; XGA/pre-2.0 VGA class accepted as display; AT keyboards that NAK the scan set command; ISA option
@@ -289,7 +289,7 @@ detection lines at POST; PnP BIOS runtime and ESCD (`pnpbios.c`); L2 enabled at 
 (`setup_l2_cache`); port I/O ordered with memory (`x86.h`);
 version string without host name, release date (`scripts/buildversion.py`).
 
-coreboot (`patches/coreboot.patch`): setup values for chipset, external cache and PCI IRQs
+coreboot (`coreboot` submodule): setup values for chipset, external cache and PCI IRQs
 (`mainboard/biostar/mb8433/newbios.c`) with the unfinished-POST fallback; PCI devices turned off before
 DRAM sizing (after a warm reset a VGA framebuffer BAR was sized as RAM); both IDE channels; PIRQ router
 found at 00:12.0 (the IBC reports 886a or 888a); POST codes on port 80h (`include/cpu/486/newbios_post.h`, also from
@@ -316,8 +316,8 @@ the original); PCI interrupts on IRQ 9-11 (15 is the secondary IDE); postcar rea
 
 ## License
 
-The scripts, tests and documents of this repository: GPL-3.0 (`LICENSE`). The patches in `patches/`
-modify, and keep the licenses of, the projects they apply to: coreboot (GPL-2.0), SeaBIOS (LGPL-3.0) and
+The scripts, tests and documents of this repository: GPL-3.0 (`LICENSE`). The forks in the submodules
+modify, and keep the licenses of, their projects: coreboot (GPL-2.0), SeaBIOS (LGPL-3.0) and
 86Box (GPL-2.0-or-later). No BIOS image, firmware blob or ROM is distributed here.
 
 ## Testing on the board without reflashing

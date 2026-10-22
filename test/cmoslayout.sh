@@ -6,11 +6,11 @@
 . "$(dirname "$0")/lib.sh"
 known="a7 4d46a367e61ad8a7"
 prev_sig=0xa6
-sig=$(sed -nE 's/^#define NB_SIG_VALUE +0x([0-9a-f]+).*/\1/p' "$nb/cmos.h")
-sum=$({ sed -n '/^enum nb_setting/,/^};/p' "$nb/cmos.h"; sed -n '/^static const u8 Defaults/,/^};/p' "$nb/build/seabios/src/setup.c"; } \
+sig=$(sed -nE 's/^#define NB_SIG_VALUE +0x([0-9a-f]+).*/\1/p' "$nb/seabios/src/newbios_cmos.h")
+sum=$({ sed -n '/^enum nb_setting/,/^};/p' "$nb/seabios/src/newbios_cmos.h"; sed -n '/^static const u8 Defaults/,/^};/p' "$nb/seabios/src/setup.c"; } \
   | sed 's|/\*.*\*/||; s|//.*||' | tr -d ' \t\n' | sha256sum | cut -c1-16)
 [ "$sig $sum" = "$known" ] || {
-  echo "FAIL [cmoslayout]: settings or Defaults changed: bump NB_SIG_VALUE in cmos.h, then set known=\"<sig> $sum\" here"
+  echo "FAIL [cmoslayout]: settings or Defaults changed: bump NB_SIG_VALUE in seabios/src/newbios_cmos.h, then set known=\"<sig> $sum\" here"
   exit 1
 }
 
