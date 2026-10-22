@@ -26,7 +26,7 @@ for opt in CONFIG_DCACHE_RAM_BASE CONFIG_DCACHE_RAM_SIZE; do
   car+=("-D$opt=$value")
 done
 sections=(-ffunction-sections -fdata-sections)   # only what is reached is linked (--gc-sections)
-flags=(-m32 -O2 -fno-pie "${sections[@]}" -I"$here/native/include" -I"$um" -I"$cb" -I"$cb/mainboard/biostar/mb8433" "${car[@]}")
+flags=(-m32 -O2 -fno-pie "${sections[@]}" -I"$here/native/include" -I"$um" -I"$cb" -I"$cb/mainboard/biostar/mb8433" -idirafter "$cb/include" "${car[@]}")
 for src in "$um/raminit.c" "$um/memmap.c" "$um/reg_init.c" "$here/native/romstage_seam.c"; do
   gcc "${flags[@]}" -Wall -Wno-format -c "$src" -o "$out/$(basename "$src" .c).o"   # coreboot code; %lu = uintptr_t only there
 done

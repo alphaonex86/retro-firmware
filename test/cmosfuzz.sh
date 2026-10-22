@@ -17,7 +17,7 @@ for opt in PIRQ_ROUTE DEBUG_PIRQ GENERATE_PIRQ_TABLE MAX_PIRQ_LINKS IRQ_SLOT_COU
   defs+=("-DCONFIG_$opt=$value")
 done
 flags=(-m32 -O2 -pthread -fsanitize=bounds,integer-divide-by-zero,shift -fsanitize-trap=all -I"$here/native/include" -I"$cb/northbridge/umc/um8881"
-  -I"$cb/arch/486/include" -I"$cb/mainboard/biostar/mb8433" "${defs[@]}")
+  -I"$cb/arch/486/include" -I"$cb/mainboard/biostar/mb8433" -idirafter "$cb/include" "${defs[@]}")
 for src in "$cb/arch/486/pirq_routing.c" "$cb/mainboard/biostar/mb8433/irq_tables.c" \
            "$cb/southbridge/umc/um8886/pirq.c"; do
   gcc "${flags[@]}" -include types.h -Wall -c "$src" -o "$out/$(basename "$src" .c).o"   # u8 before pirq_routing.h

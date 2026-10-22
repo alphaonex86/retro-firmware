@@ -7,10 +7,11 @@
 cb_mainboard=biostar/mb8433
 cb_config=$bd/coreboot.config
 
-# Headers shared by the setup utility (SeaBIOS) and the chipset code (coreboot): one copy in each tree, kept equal.
-for h in newbios_cmos.h post_serial.h bios_name.h; do
-  cmp -s "$sb/src/$h" "$cb/src/mainboard/$cb_mainboard/$h" \
-    || { echo "BUILD REFUSED: seabios/src/$h and coreboot/src/mainboard/$cb_mainboard/$h differ" >&2; exit 1; }
+# Headers shared by the setup utility (SeaBIOS) and coreboot: one copy in each tree, kept equal. The CMOS layout is
+# the same on every board (coreboot/src/include), the BIOS name and the POST code port are this board's.
+for h in include/newbios_cmos.h mainboard/$cb_mainboard/post_serial.h mainboard/$cb_mainboard/bios_name.h; do
+  cmp -s "$sb/src/${h##*/}" "$cb/src/$h" \
+    || { echo "BUILD REFUSED: seabios/src/${h##*/} and coreboot/src/$h differ" >&2; exit 1; }
 done
 
 rom() {  # tag, SeaBIOS name, extra coreboot config, [CBFS files to add: name=path ...]
