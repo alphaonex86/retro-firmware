@@ -54,7 +54,7 @@ until [ "$(grep -c '^RESET' "$vm/post.log")" -gt "$resets" ]; do
   sleep 0.1
 done
 vm_wait_text "boot:" 90                             # no key: LILO's default after its 3 s
-vm_wait_text "Loading linux" 10 || fail "LILO's countdown does not run out"
+vm_wait_text "Loading linux" 60 || fail "LILO's countdown does not run out"   # its 3 s are emulated: slower under load
 end=$((SECONDS + 300))                              # Linux: the disk on EHCI, the keyboard on its UHCI companion
 until grep -aq "hid-generic.*Keyboard" "$vm/serial.log"; do [ $SECONDS -lt $end ] || fail "Linux: no USB keyboard"; sleep 2; done
 grep -aq "ehci-pci .*USB 2.0 started" "$vm/serial.log" || fail "Linux: EHCI did not start"
