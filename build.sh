@@ -18,9 +18,15 @@ mkdir -p "$out"
 "$nb/tools/build_toolchain.sh"
 xgcc=$cb/util/crossgcc/xgcc/bin
 
+fresh() {  # build dir, source tree: a dir built from another commit of the tree goes (its dependency files are stale)
+  local c
+  c=$(git -C "$2" rev-parse HEAD)
+  [ "$(cat "$1/.commit" 2>/dev/null)" = "$c" ] || { rm -rf "${1:?}"; mkdir -p "$1"; echo "$c" > "$1/.commit"; }
+}
+
 seabios() {  # name, extra SeaBIOS config -> build/seabios/out-<name>/bios.bcj.elf (x86 BCJ filtered)
   local cfg=$nb/build/seabios/.config-$1 so=$nb/build/seabios/out-$1 log=$out/seabios-$1.build.log
-  mkdir -p "$so"
+  fresh "$so" "$sb"
   { cat "$cb/src/mainboard/$cb_mainboard/config_seabios" "$nb/seabios.config"; echo "$2"; } > "$cfg"
   local mk=(make -C "$sb" -s CROSS_PREFIX="$xgcc/i386-elf-" OUT="$so/" KCONFIG_CONFIG="$cfg")
   "${mk[@]}" olddefconfig > "$log" 2>&1
@@ -32,6 +38,7 @@ seabios() {  # name, extra SeaBIOS config -> build/seabios/out-<name>/bios.bcj.e
 # Same host-tool/warning workarounds as build_variants.sh (gcc>=15 host, author's %u for size_t).
 coreboot_build() {  # tag, SeaBIOS name, extra coreboot config -> build/coreboot/<tag>/coreboot.rom
   local tag=$1 cfg=$out/$1.config obj=$nb/build/coreboot/$1 log=$out/$1.build.log
+  fresh "$obj" "$cb"
   { cat "$cb_config"; cat <<EOF
 # CONFIG_DEBUG_HW_BREAKPOINTS is not set
 # CONFIG_DEBUG_NULL_DEREF_BREAKPOINTS is not set
