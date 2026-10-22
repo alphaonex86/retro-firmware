@@ -183,7 +183,7 @@ the original BIOS.
   socket (its lower half unreachable), and the power-on time of the 8042 and keyboard.
 - Sources: the forks are submodules (see the repository README): `coreboot-486` and `seabios-486`, branch
   `retro-486` on the 486 trees of their author, [pc2005cz/coreboot_486](https://github.com/pc2005cz/coreboot_486)
-  and [pc2005cz/seabios_486](https://github.com/pc2005cz/seabios_486); `86box` on 86Box v6.0; `ipxe`. Builds go to
+  and [pc2005cz/seabios_486](https://github.com/pc2005cz/seabios_486); `86box` on 86Box master (after v6.0); `ipxe`. Builds go to
   `build/<tree>/`, the submodules stay clean. `fetch_sources.sh` (run by the builds) checks them out and downloads the
   tarballs of the tests into `sources/`: FreeDOS 1.3, Linux 6.18. `tools/build_toolchain.sh` builds coreboot's
   i386 cross compiler once (it downloads GCC and binutils). SeaBIOS options in `seabios.config`, coreboot options

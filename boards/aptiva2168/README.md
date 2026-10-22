@@ -8,7 +8,7 @@ project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`)
 
 | Part | Real board | 86Box fork (`86box` submodule) |
 |---|---|---|
-| Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box PR #7349, backported) |
+| Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box) |
 | CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks |
 | Board register | EAh index, EBh data: index 2 bits 1-0 = JP2 bus speed (00 66, 10 60, 11 50 MHz) | follows the configured bus |
 | Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci` |
@@ -22,7 +22,7 @@ project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`)
 - `boards/aptiva2168/run_86box.sh [rom]`: the A90 with the IBM BIOS (`boards/aptiva2168/BIOSORIGINAL.bin`, a
   symlink to the dump, not in git), or a ROM of ours later.
 - `boards/aptiva2168/test/boot.sh` (also in `test/run_all.sh`): from an empty CMOS, each P54C setting gives exactly
-  its POST errors (162/163; 127 where the IBM CPU speed check rejects the CPU: P75, P90, P100).
+  its POST errors (161/163 from a new CMOS; 127 where the IBM CPU speed check rejects the CPU: P75, P90, P100).
 
 ## For the port
 

@@ -2,9 +2,10 @@
 # Boot test of the original IBM BIOS (boards/aptiva2168/BIOSORIGINAL.bin, BG2US0J, not in git) on the emulated Aptiva
 # 2168 (86Box fork, machine aptiva2168, headless),
 # one 86Box per CPU setting, in parallel, from an empty CMOS: the POST errors must be exactly the expected ones.
-# 162/163: empty CMOS. 127: INT 15h AX=2305h fails, i.e. the measured CPU speed code (32 IDIV r32 timed by the PIT,
-# EBDA:1C7h) has no entry whose bus speed matches the IBM board register (EAh/EBh, JP2): P100 measures F3h past the
-# BIOS's EFh limit, P75/P90 overflow the 16-bit tick count. A CPU it accepts reaches the SurePath Setup; otherwise
+# 161/163: a new CMOS (its RTC reads VRT 0 once, as after a battery loss). 127: INT 15h AX=2305h fails, i.e. the
+# measured CPU speed code (32 IDIV r32 timed by the PIT, EBDA:1C7h) has no entry whose bus speed matches the IBM
+# board register (EAh/EBh, JP2): P100 measures F3h past the BIOS's EFh limit, P75/P90 overflow the 16-bit tick
+# count. A CPU it accepts reaches the SurePath Setup; otherwise
 # the errors stay on the logo screen (POST 6Fh, waiting for F1). Screens are read by the local tesseract OCR (no AI).
 # usage: boards/aptiva2168/test/boot.sh   (prints PASS/FAIL per CPU, exit 1 on any failure)
 set -euo pipefail
@@ -83,9 +84,9 @@ EOF
 }
 
 pids=()   # the P54C settings of the Type I-2 board (HMM): 50, 60 and 66 MHz bus; the A90 itself is P166
-for cpu in "p75_50mhz:75000000:1.5:127 162 163" "p90_60mhz:90000000:1.5:127 162 163" \
-           "p100_66mhz:100000000:1.5:127 162 163" "p120_60mhz:120000000:2.0:162 163" \
-           "p133_66mhz:133333333:2.0:162 163" "p150_60mhz:150000000:2.5:162 163" "p166_66mhz:166666666:2.5:162 163"; do
+for cpu in "p75_50mhz:75000000:1.5:127 161 163" "p90_60mhz:90000000:1.5:127 161 163" \
+           "p100_66mhz:100000000:1.5:127 161 163" "p120_60mhz:120000000:2.0:161 163" \
+           "p133_66mhz:133333333:2.0:161 163" "p150_60mhz:150000000:2.5:161 163" "p166_66mhz:166666666:2.5:161 163"; do
   IFS=: read -r name speed multi expected <<< "$cpu"
   boot "$name" "$speed" "$multi" "$expected" & pids+=($!)
 done

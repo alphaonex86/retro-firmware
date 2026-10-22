@@ -17,7 +17,7 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 
   | Submodule | Fork, branch | Upstream base | Used by |
   |---|---|---|---|
-  | `86box` | [alphaonex86/86Box](https://github.com/alphaonex86/86Box) `retro` | 86Box v6.0 | every board (one machine each) |
+  | `86box` | [alphaonex86/86Box](https://github.com/alphaonex86/86Box) `retro` | 86Box master (after v6.0) | every board (one machine each) |
   | `coreboot-486` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-486` | pc2005cz/coreboot_486 `486` | 486 boards |
   | `seabios-486` | [alphaonex86/seabios](https://github.com/alphaonex86/seabios) `retro-486` | pc2005cz/seabios_486 `486` | 486 boards |
   | `coreboot-mainline` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-mainline` | coreboot 26.09 | Slot 1 / Socket 370 boards |

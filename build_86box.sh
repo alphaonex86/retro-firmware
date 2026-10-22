@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the 86Box fork (submodule 86box: 86Box 6.0 + test control FIFO, POST log, fault injection, RTL8139 boot ROM
+# Build the 86Box fork (submodule 86box: 86Box master + test control FIFO, POST log, fault injection, RTL8139 boot ROM
 # socket, SLiRP TFTP, and the machines of every board here). Output: build/86box/out/src/86Box (SDL frontend, tests);
 # GUI=1 also builds build/86box/out-qt/src/86Box (Qt6 GUI, run_86box.sh).
 set -euo pipefail
