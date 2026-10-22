@@ -6,10 +6,8 @@ set -euo pipefail
 nb=$(dirname "$(dirname "$(readlink -f "$0")")")
 rom=${1:-newbios}
 [ -f "$nb/out/$rom.rom" ] && [ -f "$nb/out/$rom.size" ] || { echo "no out/$rom.rom or out/$rom.size: run build.sh" >&2; exit 1; }
-xgcc=$nb/coreboot/util/crossgcc/xgcc/bin
 tree=$(mktemp -d /dev/shm/rom-size.XXXXXX)
 trap 'rm -rf "$tree"' EXIT
-mapfile -t elfs < "$nb/out/$rom.size"
-"$nb/tools/rom_size_tree.py" "$nb/out/$rom.rom" "$nb/build/coreboot/$rom/cbfstool" "$xgcc/i386-elf-nm" \
-  "$xgcc/i386-elf-objdump" "$tree/$rom" "${elfs[@]}"
+mapfile -t size < "$nb/out/$rom.size"   # cbfstool, nm, objdump, then the CBFS-NAME=ELF list
+"$nb/tools/rom_size_tree.py" "$nb/out/$rom.rom" "${size[0]}" "${size[1]}" "${size[2]}" "$tree/$rom" "${size[@]:3}"
 filelight "$tree/$rom"

@@ -11,7 +11,7 @@ It also explains the CPU background you need to read them. All assembly files li
 The facts were checked against this build:
 
 - `coreboot_486/build-newbios`, the release configuration `out/newbios.config`;
-- `build/seabios/out-rel` (the `seabios` submodule's build), with its maps, objects and disassembly.
+- `build/seabios-486/out-rel` (the `seabios-486` submodule's build), with its maps, objects and disassembly.
 
 Where something is not certain, the text says so.
 
@@ -278,7 +278,7 @@ SeaBIOS:
 
 - Kconfig files (`src/**/Kconfig`, SeaBIOS `src/Kconfig`) and `Makefile.inc` lists.
 - `boards/mb8433uud/coreboot.config` and `seabios.config`, combined by `build.sh` and `boards/mb8433uud/firmware.sh`.
-- `seabios/src/newbios_cmos.h` (the CMOS map shared by SeaBIOS and coreboot) is C.
+- `seabios-486/src/newbios_cmos.h` (the CMOS map shared by SeaBIOS and coreboot) is C.
 
 ## 7. Oddities found while commenting
 

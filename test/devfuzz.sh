@@ -6,13 +6,13 @@
 # or lying IDE drives, floppy controllers, PCI devices and option ROMs, ISA ROMs and PnP cards, USB
 # controllers and devices, corrupt CMOS, flash chips and ESCDs. Each case runs in its own process; it must not crash, hang
 # (virtual time budget, CPU loop) or misbehave (checks per area).
-# usage: [SEABIOS=tree] devfuzz.sh   (default tree: the seabios submodule, built in build/seabios/out-rel; failing cases: test/vm/devfuzz/failures.txt;
+# usage: [SEABIOS=tree] devfuzz.sh   (default tree: the seabios-486 submodule, built in build/seabios-486/out-rel; failing cases: test/vm/devfuzz/failures.txt;
 #        rerun one with a stack trace: test/vm/devfuzz/devfuzz -v area index; one area: devfuzz -a area)
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
-sb=${SEABIOS:-$nb/seabios}
-sbout=${SEABIOS_OUT:-$nb/build/seabios/out-rel}
+sb=${SEABIOS:-$nb/seabios-486}
+sbout=${SEABIOS_OUT:-$nb/build/seabios-486/out-rel}
 src=$here/native/seabios
 out=$here/vm/devfuzz
 mkdir -p "$out"

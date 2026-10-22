@@ -4,18 +4,20 @@
 # as a W49F002A: the board's 1 Mbit socket keeps A17 high, only the upper half is reached; the BIOS is in both halves).
 # [DEBUG=1] also builds out/newbios-debug.rom (SeaBIOS's log on COM1); [HALT_ON=1] builds out/newbios-halt1.rom
 # whose Halt On default is No Errors (no keyboard, dead CMOS battery).
+trees coreboot-486 seabios-486
 cb_mainboard=biostar/mb8433
 cb_config=$bd/coreboot.config
 
 # Headers shared by the setup utility (SeaBIOS) and coreboot: one copy in each tree, kept equal. The CMOS layout is
-# the same on every board (coreboot/src/include), the BIOS name and the POST code port are this board's.
+# the same on every board (<coreboot>/src/include), the BIOS name and the POST code port are this board's.
 for h in include/newbios_cmos.h mainboard/$cb_mainboard/post_serial.h mainboard/$cb_mainboard/bios_name.h; do
   cmp -s "$sb/src/${h##*/}" "$cb/src/$h" \
-    || { echo "BUILD REFUSED: seabios/src/${h##*/} and coreboot/src/$h differ" >&2; exit 1; }
+    || { echo "BUILD REFUSED: ${sb##*/}/src/${h##*/} and ${cb##*/}/src/$h differ" >&2; exit 1; }
 done
 
 rom() {  # tag, SeaBIOS name, extra coreboot config, [CBFS files to add: name=path ...]
-  local tag=$1 obj=$nb/build/coreboot/$1
+  local tag=$1 obj
+  obj=$(cb_obj "$1")
   coreboot_build "$1" "$2" "$3"
   local rom=$out/$tag.rom cbfs=("$obj/cbfstool" "$out/$tag.rom") f
   cp "$obj/coreboot.rom" "$rom"
@@ -25,7 +27,7 @@ rom() {  # tag, SeaBIOS name, extra coreboot config, [CBFS files to add: name=pa
   head -c 4096 /dev/zero | tr '\0' '\377' > "$obj/escd.bin"
   for f in fallback/postcar fallback/payload cmos_layout.bin; do "${cbfs[@]}" remove -n "$f"; done
   "${cbfs[@]}" add -t raw -n escd -f "$obj/escd.bin" -b 0x1c000 \
-    && "${cbfs[@]}" add-payload -n fallback/payload -f "$nb/build/seabios/out-$2/bios.bcj.elf" -c lzma > /dev/null \
+    && "${cbfs[@]}" add-payload -n fallback/payload -f "$(sb_out "$2")/bios.bcj.elf" -c lzma > /dev/null \
     || { echo "BUILD FAILED: $tag, no room for the ESCD and the payload" >&2; exit 1; }
   for f in "${@:4:1}" postcar "${@:5}"; do
     if [ "$f" = postcar ]; then

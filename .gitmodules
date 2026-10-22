@@ -3,17 +3,17 @@
 	url = https://github.com/alphaonex86/86Box.git
 	branch = retro
 	shallow = true
-[submodule "coreboot"]
-	path = coreboot
-	url = https://github.com/alphaonex86/coreboot.git
-	branch = retro
-	shallow = true
-[submodule "seabios"]
-	path = seabios
-	url = https://github.com/alphaonex86/seabios_486.git
-	branch = retro
 [submodule "ipxe"]
 	path = ipxe
 	url = https://github.com/alphaonex86/ipxe.git
 	branch = retro
+	shallow = true
+[submodule "seabios-486"]
+	path = seabios-486
+	url = https://github.com/alphaonex86/seabios.git
+	branch = retro-486
+[submodule "coreboot-486"]
+	path = coreboot-486
+	url = https://github.com/alphaonex86/coreboot.git
+	branch = retro-486
 	shallow = true

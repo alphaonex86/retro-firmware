@@ -16,7 +16,7 @@ vm=$bd/vm
 rom=$(readlink -f "${1:-$nb/out/newbios-2mbit.rom}")
 GUI=1 "$nb/build_86box.sh" > /dev/null
 sources=("$nb/build.sh" "$bd/firmware.sh" "$nb/seabios.config" "$bd/coreboot.config"
-         "$nb/seabios/src" "$nb/seabios/Makefile" "$nb/coreboot/src")
+         "$nb/seabios-486/src" "$nb/seabios-486/Makefile" "$nb/coreboot-486/src")
 if [ $# -eq 0 ] && { [ ! -f "$rom" ] || [ -n "$(find "${sources[@]}" -newer "$rom" -print -quit)" ]; }; then
   "$nb/build.sh" mb8433uud > /dev/null   # the ROM is missing or older than one of its sources
 fi

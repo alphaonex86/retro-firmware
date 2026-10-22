@@ -6,14 +6,14 @@
 # in 1 or 2 banks, random power-on contents, fake data SRAM and/or tag RAM; setup option, CMOS validity and
 # unfinished-POST guard). Also checks the register fields
 # against the oracle lines of test/ram.sh and the original BIOS's values measured on a real board.
-# usage: [SEABIOS=tree] dramfuzz.sh   (default tree: the seabios submodule, built in build/seabios/out-rel; failing cases: test/vm/dramfuzz/failures.txt)
+# usage: [SEABIOS=tree] dramfuzz.sh   (default tree: the seabios-486 submodule, built in build/seabios-486/out-rel; failing cases: test/vm/dramfuzz/failures.txt)
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
-cb=$nb/coreboot/src
+cb=$nb/coreboot-486/src
 um=$cb/northbridge/umc/um8881
-sb=${SEABIOS:-$nb/seabios}
-sbout=${SEABIOS_OUT:-$nb/build/seabios/out-rel}
+sb=${SEABIOS:-$nb/seabios-486}
+sbout=${SEABIOS_OUT:-$nb/build/seabios-486/out-rel}
 out=$here/vm/dramfuzz
 mkdir -p "$out"
 rm -f "$out"/*.o

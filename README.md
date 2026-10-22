@@ -11,15 +11,24 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 
 ## Layout
 
-- Submodules, each a GitHub fork with our commits on branch `retro` over the pinned upstream:
-  [alphaonex86/86Box](https://github.com/alphaonex86/86Box) (86Box v6.0),
-  [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) (pc2005cz/coreboot_486, branch 486),
-  [alphaonex86/seabios_486](https://github.com/alphaonex86/seabios_486) (pc2005cz/seabios_486, branch 486),
-  [alphaonex86/ipxe](https://github.com/alphaonex86/ipxe). Change a fork with commits in its submodule, push its
-  `retro` (pull requests to the upstream go from there), then commit the new submodule pointer here. 86box,
-  coreboot and ipxe are shallow (only the pinned commit is fetched); seabios is not: its version needs the tags.
-- `boards/<board>/`: everything about one board: `firmware.sh` (its build recipe: coreboot mainboard, config, flash
-  layout), `run_86box.sh` (its VM), `test/`, its documents and release scripts.
+- Submodules, each a GitHub fork (one repository per project, one branch per base) with our commits over the
+  pinned upstream:
+
+  | Submodule | Fork, branch | Upstream base | Used by |
+  |---|---|---|---|
+  | `86box` | [alphaonex86/86Box](https://github.com/alphaonex86/86Box) `retro` | 86Box v6.0 | every board (one machine each) |
+  | `coreboot-486` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-486` | pc2005cz/coreboot_486 `486` | 486 boards |
+  | `seabios-486` | [alphaonex86/seabios](https://github.com/alphaonex86/seabios) `retro-486` | pc2005cz/seabios_486 `486` | 486 boards |
+  | `ipxe` | [alphaonex86/ipxe](https://github.com/alphaonex86/ipxe) `retro` | iPXE | network boot |
+
+  A board of another family (Socket 7, Socket 370/Slot 1) may need other coreboot/SeaBIOS bases: they become
+  submodules `coreboot-<base>` / `seabios-<base>` on branches `retro-<base>` of the same forks, and the board's
+  `firmware.sh` names its pair (`trees coreboot-<base> seabios-<base>`); each coreboot tree has its cross compiler.
+  Change a fork with commits in its submodule, push its branch (pull requests to the upstream go from there), then
+  commit the new submodule pointer here. 86box, coreboot-486 and ipxe are shallow (only the pinned commit is
+  fetched); seabios-486 is not: its version string needs the tags.
+- `boards/<board>/`: everything about one board: `firmware.sh` (its build recipe: firmware trees, coreboot mainboard,
+  config, flash layout), `run_86box.sh` (its VM), `test/`, its documents and release scripts.
 - Shared: `build.sh [board]`, `build_86box.sh`, `fetch_sources.sh`, `seabios.config`, `tools/`, `test/` (`lib.sh`, and
   the MB-8433UUD-A tests), `test/run_all.sh` (every test of every board).
 

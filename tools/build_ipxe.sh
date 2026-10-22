@@ -12,7 +12,7 @@ mkdir -p "$nb/build"
 cp "$nb/configs/ipxe/general.h" "$nb/configs/ipxe/usb.h" "$src/src/config/local/"
 "$nb/tools/build_toolchain.sh"
 ipxe() {  # embedded script, target
-  env -u DEBUG make -C "$src/src" -s -j"$(nproc)" CROSS="$nb/coreboot/util/crossgcc/xgcc/bin/i386-elf-" \
+  env -u DEBUG make -C "$src/src" -s -j"$(nproc)" CROSS="$nb/coreboot-486/util/crossgcc/xgcc/bin/i386-elf-" \
     EMBED="$1" "$2" > "$log" 2>&1 || { tail -20 "$log"; echo "IPXE BUILD FAILED (log: $log)" >&2; exit 1; }
 }
 ipxe "$nb/test/ipxe/chain.ipxe" bin/realtek.pxe
