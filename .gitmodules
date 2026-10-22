@@ -26,3 +26,8 @@
 	path = seabios-mainline
 	url = https://github.com/alphaonex86/seabios.git
 	branch = retro-mainline
+[submodule "flashrom"]
+	path = flashrom
+	url = https://github.com/alphaonex86/flashrom.git
+	branch = retro
+	shallow = true

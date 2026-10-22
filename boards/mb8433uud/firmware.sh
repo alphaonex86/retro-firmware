@@ -45,16 +45,16 @@ rom() {  # tag, SeaBIOS name, extra coreboot config, [CBFS files to add: name=pa
   cat "$rom" "$rom" > "$out/$tag-2mbit.rom"
 }
 
-halt=${HALT_ON:-0} tag=newbios
-[ "$halt" = 0 ] || tag=newbios-halt$halt
+halt=${HALT_ON:-0} tag=newbios sbname=rel
+[ "$halt" = 0 ] || tag=newbios-halt$halt sbname=halt$halt   # its own SeaBIOS build: out/newbios.size keeps rel's
 # no coreboot log: its console alone takes 7 KB (13 KB with its messages), more than the flash has left; its POST codes
 # on COM1 time each step, and the debug ROM's SeaBIOS logs the chipset values coreboot set
 nolog="CONFIG_PAYLOAD_BCJ_X86=y
 # CONFIG_CONSOLE_SERIAL is not set
 # CONFIG_BOOTBLOCK_CONSOLE is not set
 # CONFIG_POSTCAR_CONSOLE is not set"
-seabios rel "CONFIG_NEWBIOS_HALT_ON=$halt"
-rom "$tag" rel "$nolog"
+seabios "$sbname" "CONFIG_NEWBIOS_HALT_ON=$halt"
+rom "$tag" "$sbname" "$nolog"
 if [ -n "${DEBUG:-}" ]; then   # SeaBIOS's level 1 log: its key places (device setup, option ROMs, boot, warnings)
   seabios debug "CONFIG_DEBUG_LEVEL=1
 CONFIG_DEBUG_SERIAL=y

@@ -11,7 +11,7 @@ for b in "$nb"/boards/*/firmware.sh; do   # the firmware of every board that has
   b=$(basename "$(dirname "$b")")
   "$nb/build.sh" "$b" > /dev/null || { echo "BUILD FAILED: $b" >&2; exit 1; }
 done
-[ $# -gt 0 ] || set -- setup dos pxe nicrom chipset password bigdisk ram memtest post errors hddtype busclock isapnp pnpbios fmtlint floppy deadcmos halt1 l2guard bootmenu cachetest boardtest vgamem kbdpower flashtime cachepage otherflash warmboot flashlinux usbkbd usbboot usbfault usblilo nokbd bench awarddefaults l2sram dramfuzz cmoslayout cmosfuzz devfuzz genericbuild $(cd "$nb" && ls boards/*/test/*.sh | sed 's/\.sh$//')
+[ $# -gt 0 ] || set -- setup dos pxe nicrom chipset password bigdisk ram memtest post errors hddtype busclock isapnp pnpbios fmtlint floppy deadcmos halt1 l2guard bootmenu cachetest boardtest vgamem kbdpower flashtime cachepage otherflash warmboot flashlinux usbkbd usbboot usbfault usblilo nokbd bench awarddefaults l2sram dramfuzz cmoslayout cmosfuzz devfuzz genericbuild tooloptions $(cd "$nb" && ls boards/*/test/*.sh | sed 's/\.sh$//')
 mkdir -p "$here/vm"
 limit=1800   # seconds per test, a hang guard: dramfuzz alone takes 6 min of all cores
 for t; do   # one test per core: an overloaded host made timing checks fail (boardtest IRQ 0, memtest page)

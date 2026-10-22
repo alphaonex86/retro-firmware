@@ -7,7 +7,9 @@ adds one symbol per section, at VMA + OFFSET (SeaBIOS's 16-bit code: rom16.o, on
 their compressed size in proportion. Bytes no symbol covers: mostly printable -> (strings)/<section>, else the tail of
 the symbol before them (asm and 16-bit code have no size) -> <symbol>+tail, or (no symbol)/<section>.
 (cbfs header): entry header and alignment. (free): empty CBFS space.
-usage: rom_size_tree.py ROM CBFSTOOL NM OBJDUMP OUTDIR [CBFS-NAME=ELF[,EXTRA@OFFSET...] ...]"""
+-g NAME=DIR:BYTES (tools/option_sizes.sh): DIR holds the same ELFs built without option NAME; the symbols and strings
+they lack go to a top-level directory NAME, BYTES in all (what the option saves in the compressed entry).
+usage: rom_size_tree.py [-g NAME=DIR:BYTES ...] ROM CBFSTOOL NM OBJDUMP OUTDIR [CBFS-NAME=ELF[,EXTRA@OFFSET...] ...]"""
 import os, re, shutil, subprocess, sys
 
 SCALE, BLOCK = 1024, 4096
@@ -40,10 +42,8 @@ def loaded_sections(elf, objdump):
     return sections
 
 
-def elf_parts(elf, extras, nm, objdump):
-    """-> [(source path, name, bytes)] covering every loaded byte of the ELF"""
-    data = open(elf, 'rb').read()
-    sections = loaded_sections(elf, objdump)
+def symbols(elf, extras, nm, objdump):
+    """-> [(address, size, name, source path)]"""
     syms, seen = [], set()
     for extra in extras:   # one symbol per section of another ELF of the same code
         path, offset = extra.split('@')
@@ -58,6 +58,29 @@ def elf_parts(elf, extras, nm, objdump):
         if m and m.group(1) not in seen:   # aliases counted once
             seen.add(m.group(1))
             syms.append((int(m.group(1), 16), int(m.group(2), 16), m.group(3), os.path.normpath(m.group(4) or '(no source)')))
+    return syms
+
+
+def option_group(elf, extras, nm, objdump, arg):
+    """NAME=DIR:BYTES -> (name, bytes, symbol names and strings of the ELF built without it)"""
+    name, rest = arg.split('=', 1)
+    path, nbytes = rest.rsplit(':', 1)
+    off = lambda f: os.path.join(path, os.path.basename(f))
+    names = {s[2] for s in symbols(off(elf), [off(x.split('@')[0]) + '@' + x.split('@')[1] for x in extras], nm, objdump)}
+    data = open(off(elf), 'rb').read()
+    strings = set()
+    for _, _, size, at in loaded_sections(off(elf), objdump):
+        strings.update(data[at:at + size].split(b'\0'))
+    return name, int(nbytes), names, strings
+
+
+def elf_parts(elf, extras, nm, objdump, groups):
+    """-> [(source path, name, bytes, group)] covering every loaded byte of the ELF; group: the first of groups whose
+    build lacks it, else None"""
+    data = open(elf, 'rb').read()
+    sections = loaded_sections(elf, objdump)
+    syms = symbols(elf, extras, nm, objdump)
+    sym_group = lambda n: next((g[0] for g in groups if n not in g[2]), None)
     roots = [s[3] for s in syms if s[3].startswith('/')]
     root = os.path.commonpath(roots) if roots else ''
     rel = lambda f: os.path.relpath(f, root) if f.startswith('/') else f
@@ -67,17 +90,23 @@ def elf_parts(elf, extras, nm, objdump):
         def gap(start, end):
             raw = data[off + start - vma:off + end - vma]
             if sum(32 <= b < 127 or b in (0, 10, 13) for b in raw) >= 0.85 * len(raw):
-                parts.append(('(strings)', f'{name}@{start:x}', end - start))
+                rest = end - start
+                for s in raw.split(b'\0') if groups else []:
+                    g = next((g[0] for g in groups if len(s) >= 4 and s not in g[3]), None)
+                    if g:
+                        parts.append(('(strings)', s[:40].decode('latin-1'), len(s) + 1, g))
+                        rest -= len(s) + 1
+                parts.append(('(strings)', f'{name}@{start:x}', rest, None))
             elif prev:
-                parts.append((rel(prev[3]), prev[2] + '+tail', end - start))
+                parts.append((rel(prev[3]), prev[2] + '+tail', end - start, sym_group(prev[2])))
             else:
-                parts.append(('(no symbol)', f'{name}@{start:x}', end - start))
+                parts.append(('(no symbol)', f'{name}@{start:x}', end - start, None))
         for s in sorted(s for s in syms if vma <= s[0] < vma + size):
             if s[0] > cur:
                 gap(cur, s[0])
             n = min(s[0] + s[1], vma + size) - max(s[0], cur)
             if n > 0:
-                parts.append((rel(s[3]), s[2], n))
+                parts.append((rel(s[3]), s[2], n, sym_group(s[2])))
                 cur, prev = s[0] + s[1], s
         if cur < vma + size:
             gap(cur, vma + size)
@@ -94,10 +123,14 @@ def write(path, nbytes):
 
 
 def main():
-    if len(sys.argv) < 6:
+    args, group_args = sys.argv[1:], []
+    while args[:1] == ['-g'] and len(args) > 1:
+        group_args.append(args[1])
+        args = args[2:]
+    if len(args) < 5:
         sys.exit(__doc__)
-    rom, cbfstool, nm, objdump, outdir = sys.argv[1:6]
-    elfs = dict(a.split('=', 1) for a in sys.argv[6:])
+    rom, cbfstool, nm, objdump, outdir = args[:5]
+    elfs = dict(a.split('=', 1) for a in args[5:])
     if os.path.isdir(outdir):
         shutil.rmtree(outdir)
     for e in cbfs_entries(rom, cbfstool):
@@ -110,12 +143,19 @@ def main():
             write(os.path.join(outdir, name, name), e['size'])
             continue
         elf, *extras = elfs[e['name']].split(',')
-        parts = elf_parts(elf, extras, nm, objdump)
+        groups = [option_group(elf, extras, nm, objdump, g) for g in group_args] if e['name'] == 'fallback/payload' else []
+        parts = elf_parts(elf, extras, nm, objdump, groups)
         loaded = sum(p[2] for p in parts)
         factor = e['size'] / loaded if loaded > e['size'] else 1.0   # compressed: the entry is smaller than its ELF
-        for src, sym, n in parts:
-            write(os.path.join(outdir, name, src, re.sub(r'[^\w.$+@-]', '_', sym)), n * factor)
-        write(os.path.join(outdir, name, '(unattributed)'), max(0, e['size'] - loaded * factor))
+        # an option's directory holds the bytes it saves; the rest of the entry shares what is left
+        raw = {g[0]: sum(p[2] for p in parts if p[3] == g[0]) for g in groups}
+        scale = {g[0]: g[1] / raw[g[0]] if raw[g[0]] and g[1] > 0 else factor for g in groups}
+        grouped = sum(raw[g] * scale[g] for g in raw)
+        rest = loaded - sum(raw.values())
+        scale[None] = (e['size'] - grouped) / rest if groups and rest > 0 and e['size'] > grouped else factor
+        for src, sym, n, g in parts:
+            write(os.path.join(outdir, g or name, src, re.sub(r'[^\w.$+@-]', '_', sym)), n * scale[g])
+        write(os.path.join(outdir, name, '(unattributed)'), max(0, e['size'] - sum(p[2] * scale[p[3]] for p in parts)))
 
 
 main()

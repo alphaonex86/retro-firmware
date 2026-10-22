@@ -7,7 +7,7 @@ grep MemTotal /proc/meminfo
 cat /proc/partitions
 ls /sys/class/net
 echo LINUX-TEST-OK
-# test/flashlinux.sh: rewrite the BIOS flash with flashrom (UMC patch) and tools/bios-update.sh, files by TFTP
+# test/flashlinux.sh: rewrite the BIOS flash with flashrom (UMC enable) and tools/bios-update.sh, files by TFTP
 if grep -q flashtest /proc/cmdline; then
   mkdir -p /tmp /dev && mount -t devtmpfs devtmpfs /dev && cd /tmp && export PATH=/tmp:$PATH
   for f in flashrom bios-update bad.rom a.rom a2.rom b.rom b2.rom; do tftp -g -r $f 10.0.2.2 || echo "FLASHTEST: no $f"; done
@@ -16,6 +16,18 @@ if grep -q flashtest /proc/cmdline; then
   bios-update bad.rom; echo "FLASHTEST-BAD-RC=$?"
   flashrom -p internal --force -r read.rom && cat a.rom a.rom | cmp - read.rom && bios-update b.rom && bios-update a.rom \
     && bios-update b2.rom; echo "FLASHTEST-RC=$?"
+fi
+# boards/aptiva2168/test/flashlinux.sh: the A90's 28F010 read, a wrong size refused, rewritten (files in the initrd)
+if grep -q aptivaflash /proc/cmdline; then
+  mkdir -p /tmp /dev && mount -t devtmpfs devtmpfs /dev && cd /flash && export PATH=/flash:$PATH
+  if grep -q aptivaflash=novpp /proc/cmdline; then
+    bios-update b.rom aptiva2168; echo "FLASHTEST-NOVPP-RC=$?"
+  else
+    flashrom -p internal:laptop=this_is_not_a_laptop -r read.rom && cmp a.rom read.rom; echo "FLASHTEST-READ-RC=$?"
+    bios-update bad.rom aptiva2168; echo "FLASHTEST-BAD-RC=$?"
+    bios-update b.rom aptiva2168 && flashrom -p internal:laptop=this_is_not_a_laptop -r read2.rom \
+      && cmp b.rom read2.rom; echo "FLASHTEST-RC=$?"
+  fi
 fi
 # test/nicrom.sh: tools/rtl8139-bootrom switches the card's boot ROM off, on (64 KiB) and off in its EEPROM
 if grep -q romtest /proc/cmdline; then

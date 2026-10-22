@@ -1,7 +1,7 @@
 #!/bin/bash
 # Get what the firmware is built and tested from, at the tested versions: the forks as submodules (86box, coreboot,
-# seabios, ipxe: their commits are pinned here), the rest into sources/ (idempotent: existing entries, e.g. symlinks
-# to local copies, are kept). Tarballs are checked against their SHA-256.
+# seabios, ipxe, flashrom: their commits are pinned here), the rest into sources/ (idempotent: existing entries, e.g.
+# symlinks to local copies, are kept). Tarballs are checked against their SHA-256.
 set -euo pipefail
 nb=$(dirname "$(readlink -f "$0")")
 src=$nb/sources
@@ -31,6 +31,3 @@ file_sha https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/distributions/
   64a934585087ccd91a18c55e20ee01f5f6762be712eeaa5f456be543778f9f7e "$src/FD13-LiteUSB.zip"
 file_sha https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.55.tar.xz \
   f410638061a165c12f42ab871d2f3fcd525515359b5faeee80969cff84524df9 "$src/linux-6.18.55.tar.xz"
-# BIOS update from Linux: flashrom (the HDD image's Buildroot version), patched by patches/buildroot/flashrom.
-file_sha https://github.com/flashrom/flashrom/archive/v1.7.0/flashrom-1.7.0.tar.gz \
-  c5a8892158bd749aadfee6e114eec268130cdd8c2027fd1ddf44273755b07b59 "$src/flashrom-1.7.0.tar.gz"

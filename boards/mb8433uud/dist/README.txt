@@ -108,8 +108,8 @@ SeaBIOS:
 Tools
 -----
 - flashrom adapted for this chipset (UM8886BF/UM8881F flash write enable, the 1 Mbit socket's alias
-  handled) so anyone can update the BIOS from Linux: bios-update BIOS.bin. The patch is in the
-  repository (patches/buildroot/flashrom).
+  handled) so anyone can update the BIOS from Linux: bios-update BIOS.bin. It is in the
+  repository (submodule flashrom, our fork of flashrom).
 - 86Box adapted to emulate this board better: the UM8881F DRAM and L2 cache (with faulty chips),
   the Intel 28F001BX flash and its write enable, the RTL8139 boot ROM socket and EEPROM, UHCI fixes,
   a dead CMOS battery, a POST card log. Every release passes its test suite in this emulator first.

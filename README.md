@@ -23,6 +23,7 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
   | `coreboot-mainline` | [alphaonex86/coreboot](https://github.com/alphaonex86/coreboot) `retro-mainline` | coreboot 26.09 | Slot 1 / Socket 370 boards |
   | `seabios-mainline` | [alphaonex86/seabios](https://github.com/alphaonex86/seabios) `retro-mainline` | SeaBIOS rel-1.17.0 | Slot 1 / Socket 370 boards |
   | `ipxe` | [alphaonex86/ipxe](https://github.com/alphaonex86/ipxe) `retro` | iPXE | network boot |
+  | `flashrom` | [alphaonex86/flashrom](https://github.com/alphaonex86/flashrom) `retro` | flashrom v1.7.0 | BIOS update from Linux (`tools/build_flashrom.sh`, `tools/bios-update.sh`) |
 
   Bases by family: 486 and Socket 7 (128 KiB flash, i586 at most: built for the i486 instruction set, i586 features
   only after CPUID) use the 486 trees, the only coreboot cut to that size and with a cache-as-RAM that needs no MTRR;
@@ -31,7 +32,7 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
   `retro-<base>` of the same forks; the board's `firmware.sh` names its pair (`trees ...`); each coreboot tree has
   its own cross compiler (`tools/build_toolchain.sh <tree>`: mainline needs GCC 15).
   Change a fork with commits in its submodule, push its branch (pull requests to the upstream go from there), then
-  commit the new submodule pointer here. 86box, the coreboot trees and ipxe are shallow (only the pinned commit
+  commit the new submodule pointer here. 86box, the coreboot trees, ipxe and flashrom are shallow (only the pinned commit
   is fetched); the seabios trees are not: their version string needs the tags.
 - `boards/<board>/`: everything about one board: `firmware.sh` (its build recipe: firmware trees, coreboot mainboard,
   config, flash layout), `run_86box.sh` (its VM), `test/`, its documents and release scripts.
@@ -44,7 +45,9 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 - `test/run_all.sh`: builds what is missing and runs all tests in parallel, one 86Box per core.
 - Where the bytes of a ROM go: `tools/filelight.sh [rom]` opens Filelight on a tree made in RAM (`/dev/shm`, removed
   when Filelight closes): CBFS entry, source file, function or variable, each file 1024 times its bytes in the ROM
-  (Filelight counts 4 KiB disk blocks): its MiB are KiB of ROM.
+  (Filelight counts 4 KiB disk blocks): its MiB are KiB of ROM; each CONFIG option that can be cut (the setup tools
+  `CONFIG_NEWBIOS_TOOL_*`, existing SeaBIOS options) is a top-level directory of what it saves.
+- What each CONFIG option saves, as a table: `tools/option_sizes.sh [rom [option...]]` (one SeaBIOS build per option).
 - `boards/<board>/run_86box.sh [rom]`: the board in the 86Box fork (Qt GUI).
 
 Licenses: the scripts, tests and documents here GPL-3.0 (`LICENSE`); the forks keep their projects' licenses

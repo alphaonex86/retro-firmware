@@ -1,7 +1,7 @@
 #!/bin/bash
 # BIOS update from Linux on the board (86Box W49F002A, A17 high as in its 1 Mbit socket: only the upper half reached),
 # booted by Etherboot in the card's socket ROM, then iPXE, the tools and images by TFTP:
-#  - flashrom (UMC patch, tools/build_flashrom.sh) refuses a plain 256 KiB write: on the board one erased the BIOS
+#  - flashrom (UMC enable, tools/build_flashrom.sh) refuses a plain 256 KiB write: on the board one erased the BIOS
 #    through the alias (max decode 128 KiB);
 #  - tools/bios-update.sh refuses a file of the wrong size, then the chip read back as the image, and rewrites it:
 #    the 96 KiB main block changed (b.rom), the image restored (a.rom), a free byte of the boot block changed (b2.rom).

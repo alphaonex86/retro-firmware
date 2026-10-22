@@ -99,6 +99,37 @@ F7 defaults, F10 save & reboot (Y/N), Esc in the main menu quits without saving.
 | LOAD BIOS DEFAULTS, LOAD SETUP DEFAULTS (also F6/F7 on the pages) | the original BIOS's fail-safe and Setup values, except Standard CMOS | |
 | SUPERVISOR PASSWORD, SAVE & EXIT, EXIT WITHOUT SAVING | as in Award (its IDE HDD AUTO DETECTION: the IDE DRIVES page of HARDWARE INFORMATION) | |
 
+Each page of HARDWARE INFORMATION, BENCHMARKS and HARDWARE TESTS is a SeaBIOS Kconfig bool, on by default (menu
+"Setup utility tools" in `seabios-486/src/Kconfig`; `# CONFIG_NEWBIOS_TOOL_... is not set` in `seabios.config` or the
+board's SeaBIOS config turns one off): its code, strings and menu entry are left out, and a menu left empty leaves the
+main menu. What each saves on `out/newbios.rom` alone (bytes, `tools/option_sizes.sh`; the free space moves by CBFS's
+alignment steps):
+
+| `CONFIG_NEWBIOS_TOOL_` | Page | Payload (LZMA) | Free space |
+|---|---|---:|---:|
+| `BOARD_TEST` | BOARD TEST | 6,428 | 6,432 |
+| `MEMTEST` | MEMORY TEST | 2,850 | 2,848 |
+| `L2_SRAM_TEST` | L2 SRAM TEST (UMC chipset only) | 2,444 | 2,432 |
+| `CACHE_TEST` | CACHE TEST (UMC only; also its step log in the POST's L2 init) | 1,509 | 1,504 |
+| `INFO_CPU` | CPU, CACHE AND MEMORY | 1,397 | 1,376 |
+| `SURFACE_SCAN` | HDD SURFACE SCAN | 1,045 | 1,024 |
+| `BENCH_DISK` | HARD DISK BENCHMARK | 958 | 960 |
+| `BENCH_CPU` | CPU BENCHMARK | 873 | 864 |
+| `INFO_USB` | USB DEVICES (also the device list kept at POST) | 686 | 672 |
+| `CHIPSET_REGS` | CHIPSET REGISTERS (UMC only) | 595 | 576 |
+| `BENCH_MEMORY` | MEMORY SPEED | 594 | 576 |
+| `INFO_PCI` | PCI DEVICES | 432 | 416 |
+| `BENCH_DISK_SPEED` | HARD DISK SPEED | 349 | 352 |
+| `INFO_IDE` | IDE DRIVES | 292 | 288 |
+| `INFO_ISA` | ISA RESOURCES AND IRQ MAP | 280 | 256 |
+| all of them | | 23,288 | 23,264 |
+
+All at once saves more than the sum (20,732): code shared by several tools (graphics, disk timing, progress bars,
+IDE access, the tool menus) goes only with its last user. Existing SeaBIOS options this ROM has on, measured the same
+way: `PNPBIOS` 2,219, `USB_MSC` 2,056, `FLOPPY` 2,030, `USB_EHCI` 1,618, `USB_UHCI` 1,444, `USB_OHCI` 1,164,
+`CDROM_BOOT` 1,045, `CDROM_EMU` 658, `MOUSE` 612, `BOOTORDER` 504, `APMBIOS` 471, `USB_HUB` 401, `SERIAL` 268,
+`HOST_BIOS_GEOMETRY` 264, `LPT` 145 (payload bytes).
+
 The chipset and super I/O register fields are the ones the original BIOS writes for the same values:
 `test/oracle/` changes each item of the original setup in 86Box, saves, reboots and dumps the PCI config
 space and the super I/O registers (`award_map.txt`). Chipset Auto configuration (default) keeps the
@@ -194,7 +225,13 @@ the original BIOS.
 - Where the bytes go: `tools/filelight.sh [rom]` (default `newbios`) opens Filelight on a tree made in RAM: CBFS
   entry, source file, function or variable; each file is 1024 times its bytes in the ROM (Filelight counts 4 KiB disk
   blocks): read its MiB as KiB of ROM. Compressed entries are shared in proportion; `(strings)`, `(cbfs header)`,
-  `(free)` as named (`tools/rom_size_tree.py`).
+  `(free)` as named (`tools/rom_size_tree.py`). Each CONFIG option that can be cut is a top-level directory
+  `CONFIG_...` holding the functions, variables and strings it removes, as large as what it saves.
+- What each CONFIG option costs: `tools/option_sizes.sh [rom [option...]]` builds the ROM's SeaBIOS once per option
+  off (`build/<tree>/out-off-<option>`, in parallel; `JOBS=n`), puts each payload in a copy of the ROM and prints the
+  payload bytes and free space it saves (`out/<rom>.options.txt`): every `NEWBIOS_TOOL_*`, all of them at once, and
+  the existing SeaBIOS options worth cutting that the ROM has on. `filelight.sh` runs it when its list is older than
+  the ROM (3 minutes for the first run, seconds once built).
 - Host: a Linux with gcc, make, git, curl, python3, unzip, nasm (tests), cmake and Qt6 (86Box GUI).
 
 ## Tests (86Box fork)
@@ -235,7 +272,7 @@ out) and COM1:
 | `l2sram` | setup L2 SRAM TEST on 64K-1M, 1 or 2 bank L2s (all found, all OK), then 86Box faults injected (`BOX86_L2_FAULT=bank:lane:mask`, `BOX86_L2_TAG_FAULT=mask`): a chip with a stuck bit, a dead chip, a tag bit, the dirty bit, two faults at once: each named; a POST that stopped with the L2 on leaves it off at the next |
 | `otherflash` | a JEDEC flash chip mb-8433UUD does not know (86Box `BOX86_FLASH=sst39sf010`, as a W49F002A or SST39SF010A): POST, save and reboot, reset; the flash is not written |
 | `warmboot` | Ctrl+Alt+Del (keyboard controller reset: the board's port 92h does not reset; CPU only, not the chipset) on the operator's setup (2 Mbit flash, RTL8139C with Etherboot, Am5x86 3x40): from DOS twice, from the setup, then three times with the card left receiving by iPXE (loaded by Etherboot) while LAN broadcasts arrive every ms (`BOX86_NET_NOISE_MS`): the POST always finishes |
-| `flashlinux` | BIOS update from Linux on the emulated board (W49F002A, A17 high, its JEDEC commands and sector map, programming only clears bits), booted by Etherboot + iPXE: flashrom (UMC patch) refuses a plain 2 Mbit write (the real board's lost BIOS), `bios-update` refuses a wrong size, reads the chip back as the image, rewrites the 96 KiB main block and a boot block byte; after a reset the rewritten BIOS runs, the upper half holds it, the lower half is untouched |
+| `flashlinux` | BIOS update from Linux on the emulated board (W49F002A, A17 high, its JEDEC commands and sector map, programming only clears bits), booted by Etherboot + iPXE: flashrom (UMC chipset enable) refuses a plain 2 Mbit write (the real board's lost BIOS), `bios-update` refuses a wrong size, reads the chip back as the image, rewrites the 96 KiB main block and a boot block byte; after a reset the rewritten BIOS runs, the upper half holds it, the lower half is untouched |
 | `usbkbd` | USB keyboard only (86Box VT6212 like the operator's card, handed from EHCI to its UHCI companion, low-speed HID keyboard; the PS/2 keyboard never answers): no keyboard error, F1/DEL/setup navigation and Ctrl+Alt+Del on it work, the USB page lists it; with an AT keyboard too (also one waking after the POST's 3 s), both type |
 | `usbboot` | FreeDOS from a USB disk (bulk-only mass storage), then Ctrl+Alt+Del twice while the USB controller still runs: the POST finishes and boots from USB again; with an IDE disk too, the default order boots the IDE disk and "1st Boot Device: USB" the USB one |
 | `awarddefaults` | `tools/award_defaults.py` (own -lh5- encoder/decoder) changes the original Award BIOS's setup defaults (External Cache off, boot C,A): the patched 2 Mbit image boots in 86Box with them on a cleared CMOS and the L2 off |
@@ -244,6 +281,7 @@ out) and COM1:
 | `nokbd` | the operator's setup: no AT keyboard (hung 8042), USB keyboard and stick on the VT6212: F1, every setup page, F10 save and warm reboot (the USB keyboard still found: EHCI hands it over before its companions scan), boot menu, LILO "dos", MS-DOS "ver", Ctrl+Alt+Del resets within 3 s, then Linux finds the disk on EHCI and the keyboard on UHCI with no stray interrupt; with no keyboard at all the POST errors do not halt the boot |
 | `bench` | benchmark pages (SpeedSys style: black, 8x8 font) on 86Box screenshots, by pixel colors and by their text (`test/bench/gridocr.py` matches each 8x8 cell against the video BIOS font exactly; no AI in the tests): memory chart curves (read, write, move), CPU ALU bar, linear read curve of the IDE disk, a speed bar per disk (IDE and USB); back to text mode after each |
 | `deadcmos` | dead CMOS battery: random CMOS images (RTC registers, shutdown code 0Fh, mb-8433UUD block, boot-failure counter) at power-on; POST reaches the F1 prompt and DOS boots |
+| `tooloptions` | SeaBIOS with each setup tool off (`CONFIG_NEWBIOS_TOOL_*`) and with all off builds, fits and saves bytes, its menu title gone (`tools/option_sizes.sh`; P3B-F's with all off too); in 86Box, with all off the main menu has no tool menus and works, with MEMORY TEST off HARDWARE TESTS lists the others |
 | `devfuzz` | native: SeaBIOS IDE/ATAPI, floppy, PCI option ROMs, ISA ROMs and ISA PnP, USB (UHCI/OHCI/EHCI, hubs, keyboard, storage) and CMOS/setup, compiled unchanged under ASan/UBSan with SeaBIOS's own printf engine (src/output.c), against fault-injecting device models (edge values, garbage, never-ready devices, USB controllers still running after a warm boot: stopped before bus mastering), a ROM in a 2 Mbit flash's unreachable lower half never run: no hang, crash or overflow |
 
 Inputs: `sources/` (`fetch_sources.sh`); the 86Box ROM set ([86Box/roms](https://github.com/86Box/roms) in
@@ -339,8 +377,8 @@ says so ("the previous POST stopped with it on"), so the setup and this test sta
 
 As root: `bios-update newbios-halt1.rom` (`tools/bios-update.sh`, in the HDD image's `/usr/sbin`; a 128 KiB ROM, or a
 256 KiB one). The board's 1 Mbit socket keeps A17 of a 2 Mbit chip high: only its upper 128 KiB is reached, the lower
-half is an alias of it. `bios-update` runs flashrom 1.7.0 with `patches/buildroot/flashrom` (UMC UM8886BF/UM8881F
-chipset enable; uClibc-ng fix of libpci's filter) on that region only, then verifies it. flashrom alone declares a
+half is an alias of it. `bios-update` runs our flashrom 1.7.0 (submodule `flashrom`: UMC UM8886BF/UM8881F chipset
+enable; uClibc-ng fix of libpci's filter) on that region only, then verifies it. flashrom alone declares a
 128 KiB decode and refuses to write the 2 Mbit chip: a plain `flashrom -w` erased the BIOS through the alias on the
 real board. It also refuses when the BIOS runs from the chip instead of shadow RAM. `tools/build_flashrom.sh` builds
 the same flashrom for the test Linux.
