@@ -10,7 +10,7 @@ project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`)
 |---|---|---|
 | Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box) |
 | CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks |
-| Board register | EAh index, EBh data: index 2 bits 1-0 = JP2 bus speed (00 66, 10 60, 11 50 MHz) | follows the configured bus |
+| Bus-speed jumper JP2 | on the FDC37C933 GPIO GP21/GP20, read at EAh (index 2) / EBh: 00 66, 10 60, 11 50 MHz | Super I/O GPIO input, follows the configured bus |
 | Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci` |
 | PCI slots | riser, devices 07h/0Bh/0Ch; INTA: 0Bh -> PIRQ0, 07h/0Ch -> PIRQ1 (as the IBM BIOS routes) | same |
 | Super I/O | SMC FDC37C933 at 370h | FDC37C93x (ID 02h), 256-byte RTC |
@@ -29,3 +29,12 @@ project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`)
 Facts the firmware needs, from running the IBM BIOS under trace (`docs/bios-extract` in the Aptiva project): the
 82C557M index register and 82C558M PCI config values it sets, the Super I/O configuration, the PIRQ routing, the
 Trident VGA BIOS (X5.3B) to put in CBFS for SeaBIOS, and the POST error/CPU speed logic.
+
+## The operator's real machine
+
+- The system board's PS/2 keyboard port is physically destroyed (the keyboard works on another board): the IBM BIOS
+  reports 301 Keyboard Error and 8603 Pointing Device Error and stops at its SurePath error screen, which needs a key.
+  Nothing boots or flashes through the IBM BIOS.
+- So our firmware goes on a dedicated Intel TN28F010 (128 KiB, 12 V VPP; fits the BIOS socket) programmed outside the board, the
+  original MX28F1000 with the IBM BIOS kept untouched as the fallback; it must boot without an AT keyboard
+  (USB keyboard on a PCI USB card), and is debugged on the real board through POST codes and COM1.
