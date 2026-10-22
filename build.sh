@@ -13,6 +13,9 @@ bd=$nb/boards/$board
 out=$nb/out
 mkdir -p "$out"
 "$nb/fetch_sources.sh" firmware > /dev/null
+# Version strings with 12-digit hashes: git's own abbreviation grows with the objects of each clone, so two clones of
+# one commit made different ROMs.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.abbrev GIT_CONFIG_VALUE_0=12
 
 trees() {  # coreboot submodule, SeaBIOS submodule: the trees of this board, and the coreboot tree's cross compiler
   cb=$nb/$1 sb=$nb/$2
