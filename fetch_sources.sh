@@ -6,6 +6,15 @@ set -euo pipefail
 nb=$(dirname "$(readlink -f "$0")")
 src=$nb/sources
 mkdir -p "$src"
+# A submodule is moved to its pinned commit only from a commit this repository pinned before (after a pull, or a fresh
+# clone): one at any other commit holds work the pointer does not record, it is refused, never reset (`git add <it>`).
+for m in $(git -C "$nb" config -f .gitmodules --get-regexp 'path$' | awk '{print $2}'); do
+  pin=$(git -C "$nb" ls-files -s "$m" | awk '{print $2}')
+  head=$(git -C "$nb/$m" rev-parse -q --verify HEAD 2>/dev/null || true)
+  [ -z "$head" ] || [ "$head" = "$pin" ] || git -C "$nb" log --format=%H -- "$m" \
+    | while read -r c; do git -C "$nb" ls-tree "$c" "$m"; done | grep -q " $head"$'\t' \
+    || { echo "REFUSED: submodule $m is at ${head:0:12}, not its pinned ${pin:0:12}: git add $m" >&2; exit 1; }
+done
 git -C "$nb" -c protocol.file.allow=always submodule update --init --quiet   # local origins need file:// allowed
 
 file_sha() {  # url, sha256, file
