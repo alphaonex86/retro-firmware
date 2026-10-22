@@ -13,16 +13,21 @@ for b in "$nb"/boards/*/firmware.sh; do   # the firmware of every board that has
 done
 [ $# -gt 0 ] || set -- setup dos pxe nicrom chipset password bigdisk ram memtest post errors hddtype busclock isapnp pnpbios fmtlint floppy deadcmos halt1 l2guard bootmenu cachetest boardtest vgamem kbdpower flashtime cachepage otherflash warmboot flashlinux usbkbd usbboot usbfault usblilo nokbd bench awarddefaults l2sram dramfuzz cmoslayout cmosfuzz devfuzz genericbuild $(cd "$nb" && ls boards/*/test/*.sh | sed 's/\.sh$//')
 mkdir -p "$here/vm"
+limit=1800   # seconds per test, a hang guard: dramfuzz alone takes 6 min of all cores
 for t; do   # one test per core: an overloaded host made timing checks fail (boardtest IRQ 0, memtest page)
   while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
   script=$here/$t.sh log=$here/vm/${t//\//_}
   [[ $t == */* ]] && script=$nb/$t.sh
-  (timeout 600 "$script" > "$log.out" 2>&1; echo $? > "$log.rc") &
+  (timeout $limit "$script" > "$log.out" 2>&1; echo $? > "$log.rc") &
 done
 wait
 fails=0
 for t; do   # the exit status: a test with several VMs may print PASS for one, then fail
   log=$here/vm/${t//\//_}
-  if [ "$(cat "$log.rc")" = 0 ]; then echo "PASS $t"; else echo "FAIL $t (log: $log.out)"; fails=$((fails + 1)); fi
+  case $(cat "$log.rc") in
+    0) echo "PASS $t";;
+    124) echo "FAIL $t: TIMEOUT after $limit s (log: $log.out)"; fails=$((fails + 1));;
+    *) echo "FAIL $t (log: $log.out)"; fails=$((fails + 1));;
+  esac
 done
 exit $fails
