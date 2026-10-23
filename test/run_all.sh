@@ -14,13 +14,16 @@ done
 [ $# -gt 0 ] || set -- setup dos pxe nicrom chipset password bigdisk ram memtest post errors hddtype busclock isapnp pnpbios fmtlint floppy deadcmos halt1 l2guard bootmenu cachetest boardtest vgamem kbdpower flashtime cachepage otherflash warmboot flashlinux usbkbd usbboot usbfault usblilo nokbd bench awarddefaults l2sram dramfuzz cmoslayout cmosfuzz devfuzz genericbuild tooloptions $(cd "$nb" && ls boards/*/test/*.sh | sed 's/\.sh$//')
 mkdir -p "$here/vm"
 limit=1800   # seconds per test, a hang guard: dramfuzz alone takes 6 min of all cores
+script() { if [[ $1 == */* ]]; then echo "$nb/$1.sh"; else echo "$here/$1.sh"; fi; }
+alone() { grep -q '^# run_all: alone' "$(script "$1")"; }
+run() { local log=$here/vm/${1//\//_}; timeout $limit "$(script "$1")" > "$log.out" 2>&1; echo $? > "$log.rc"; }
 for t; do   # one test per core: an overloaded host made timing checks fail (boardtest IRQ 0, memtest page)
+  alone "$t" && continue
   while [ "$(jobs -rp | wc -l)" -ge "$(nproc)" ]; do wait -n; done
-  script=$here/$t.sh log=$here/vm/${t//\//_}
-  [[ $t == */* ]] && script=$nb/$t.sh
-  (timeout $limit "$script" > "$log.out" 2>&1; echo $? > "$log.rc") &
+  run "$t" &
 done
 wait
+for t; do alone "$t" && run "$t"; done   # tests that use every core, one after the other
 fails=0
 for t; do   # the exit status: a test with several VMs may print PASS for one, then fail
   log=$here/vm/${t//\//_}

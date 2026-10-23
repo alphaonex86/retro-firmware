@@ -1,0 +1,20 @@
+# SIMM configurations of the 82C557M DRAM model (86box opti55x.c) and what the IBM BIOS BG2US0J does on each:
+# ramoracle.sh measures it, ram.sh and dramfuzz.sh check our firmware against it. One per line:
+#   <J23/J24 type> <J27/J28 type> <memory KB | hang@<POST code>> <13h> <14h> <19h> [unusable] [stuck=<hex>:<bit>]
+#   [ours=<KB>,<13h>,<14h>,<19h>] [partial]
+# unusable: the IBM BIOS cannot size it (its own choice); stuck: that RAM bit reads 0; ours: where our firmware
+# differs (it uses what the SIMMs give); partial: our firmware reports SIMMs it can address only in part (POST 33h).
+4 0 8192 8b 80 88
+0 4 8192 88 83 88
+4 4 16384 8b 83 88
+5 0 16384 bb 80 88
+2 0 4096 99 80 88
+1 2 6144 89 91 88
+3 6 20480 8a 84 88
+4 5 24576 8b b3 88
+5 4 24576 bb 83 88
+7 9 98304 8d d5 88
+9 9 131072 dd d5 88
+8 0 hang@A7 8d 80 88 unusable ours=32768,cc,80,88
+10 0 32768 8d 80 88 unusable partial
+4 0 7168 8b 80 88 stuck=7f0000:1

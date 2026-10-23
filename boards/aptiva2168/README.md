@@ -1,7 +1,7 @@
 # IBM Aptiva A90 (machine type 2168, Type I-2 system board)
 
 The second board of this repository. Status: emulated in the 86Box fork with the original IBM BIOS; the coreboot and
-SeaBIOS port is at step 3 of its plan (below; step 2, the emulator's P54C cache-as-RAM, is done too). The board's photos, IBM manuals, datasheets, the BIOS analysis and the
+SeaBIOS port is at step 4 of its plan (below): our ROM boots to SeaBIOS in the emulator. The board's photos, IBM manuals, datasheets, the BIOS analysis and the
 port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`,
 `docs/port/PORT_PLAN.md`).
 
@@ -13,7 +13,7 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
 | DRAM | 4 x 72-pin SIMM in two pairs, J23/J24 (RAS0#/RAS1#, inferred) and J27/J28 (RAS2#/RAS3#) | flat RAM; with a pair set in `[OPTi 82C55x (Viper)]` `pair0`/`pair1`, the 82C557M decode (13h/14h/19h, MA map, aliases, absent banks, `stuck_addr`/`stuck_bit`) |
 | CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks; with a SIMM pair set, its L1 data cache as RAM (CR0.CD/NW, `src/cpu/cache_l1.c`: 8 KB 2-way 32-byte lines, LRU, KEN# and WB/WT# from the 82C557M) |
 | Bus-speed jumper JP2 | on the FDC37C933 GPIO GP21/GP20, read at EAh (index 2) / EBh: 00 66, 10 60, 11 50 MHz | Super I/O GPIO input, follows the configured bus |
-| Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci` |
+| Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci`, PCI class VGA (030000, the class in its BIOS's PCI data) |
 | PCI slots | riser, devices 07h/0Bh/0Ch; INTA: 0Bh -> PIRQ0, 07h/0Ch -> PIRQ1 (as the IBM BIOS routes) | same |
 | Super I/O | SMC FDC37C933 at 370h | FDC37C93x (ID 02h), 256-byte RTC |
 | Flash | MX28F1000 128 KiB, IBM BIOS BG2US0J 03/06/96 | AMD 28F010 model; `BOX86_FLASH=tn28f010`: Intel TN28F010 |
@@ -31,36 +31,73 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
 - `boards/aptiva2168/test/car.sh`: the probe ROM `car.asm` checks the L1 model: CAR with CD/NW, a write outside the CAR
   lines lost, more than 8 KiB evicting the least recently used way, code fetches apart, INVD losing Modified lines,
   WBINVD writing them back, no fill outside KEN#; on flat RAM (no model) it must fail.
-- `boards/aptiva2168/test/ramoracle.sh`: the IBM BIOS on 13 SIMM configurations of the DRAM model: the memory its
-  Setup shows and its 13h/14h/19h, the oracle for our raminit. SIMMs it cannot size: 2 x 32 MB 8Mx32 (MA11 is RAS4#)
+- `boards/aptiva2168/test/ramoracle.sh`: the IBM BIOS on the 14 SIMM configurations of `test/simm_configs.txt` (the
+  DRAM model): the memory its Setup shows and its 13h/14h/19h, the oracle for our raminit. SIMMs it cannot size: 2 x 32 MB 8Mx32 (MA11 is RAS4#)
   gives 32 MB; 2 x 16 MB double-sided (2Mx32 sides) hangs its memory test at 16 MB (POST A7, an alias overwrites low
   memory; inferred for the real board).
+- `boards/aptiva2168/test/ram.sh`: our ROM on the same configurations: the memory SeaBIOS counts and 13h/14h/19h are
+  the IBM BIOS's, or the line's `ours=` where the IBM BIOS fails; the warning POST codes below where expected.
+- `boards/aptiva2168/test/dramfuzz.sh`: native, no emulator: `raminit.c` against a C port of the DRAM model
+  (`test/native/`), all 1089 pairs of SIMM geometries (empty or 9-12 row/column bits, 1-2 sides), each also with a
+  floating bus and a faulty bit at every dword the sizing reads and at random addresses (1.36 million cases, about
+  12 s on 16 cores): the best top the chipset can address, one-to-one decode, same registers with a faulty bit,
+  no access to the cache-as-RAM lines, the POST codes; then `simm_configs.txt`.
+- `boards/aptiva2168/test/post.sh`: our ROM to SeaBIOS's text screen (Trident VGA BIOS from CBFS, POST memory test,
+  summary, boot attempts), then the same after Ctrl+Alt+Del.
 - Tests start an A90 with `vm_machine=aptiva2168 vm_start` (`test/lib.sh`, SIMMs by `opti_ram_cfg`);
   `BOX86_USB`/`BOX86_USB_KBD`/`BOX86_USB_DISK` add the VIA USB card as on the MB-8433.
 
-## Our firmware (port step 3: skeleton)
+## Our firmware (port step 4: up to SeaBIOS)
 
 `./build.sh aptiva2168` -> `out/aptiva2168.rom` (128 KiB; `boards/aptiva2168/firmware.sh`). It needs the board's
 Trident VGA BIOS X5.3B as `boards/aptiva2168/vgabios.bin` (a link to the Aptiva project's
 `docs/bios-extract/trident_tgui9680_vgabios_X5.3B_1996-02-29.bin`; IBM's, never in git, sha256 checked), stored as
-CBFS `pci1023,9660.rom` (LZMA). The build fails when something does not fit and prints the free bytes.
+CBFS `pci1023,9660.rom.lzma` (SeaBIOS decompresses a file by that suffix). The build fails when something does not fit
+and prints the free bytes (12,292 at step 4).
 
 coreboot (`coreboot-486`: mainboard `ibm/aptiva2168`, northbridge `opti/viperm`, southbridge `opti/82c558m`, the
-FDC37C93x in `smscsuperio`) runs the bootblock and cache-as-RAM, then stops in romstage: no DRAM init yet (step 4).
-SeaBIOS is built without board code (`NEWBIOS_BOARD_GENERIC`), with the cuts of `seabios.config`; nothing runs it yet.
+FDC37C93x in `smscsuperio`):
+- bootblock: the whole flash at E0000 (romstage runs there) and at 4 GiB (ROMCS# 4Ah/4Bh), E/F shadow off (a CPU-only
+  reset keeps it), cache-as-RAM, the FDC37C93x keyboard controller and COM1.
+- romstage: the IBM BIOS's 82C557M/82C558M register values without L2, DRAM timing and ATCLK by the JP2 bus clock
+  (FDC37C93x GP21-GP20: 66/60 MHz 01h = DDh, 50 MHz or unknown FEh), refresh (PIT 1), DRAM sizing (`raminit.c`: each
+  SIMM side probed for its row and column lines at bank code 7, then the largest code it fills, at most 5 as MA11 is
+  RAS4#: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
+  memory count (a dword per 64 KiB; the DRAM ends at the MiB below a failing block).
+- postcar: L1 write-back; C0000-FFFFF shadow RAM read/write (SeaBIOS GENERIC cannot write-protect it), C0000/F0000
+  cacheable, no flash below 1 MiB.
+- ramstage: PCI, PIRQ0-3# to IRQ10/11/10/11 level (IBM: 0Bh INTA PIRQ0#, 07h/0Ch INTA PIRQ1#; INTB-D by the IBM BIOS's
+  swizzle, `$PIR`), MIDE legacy mode, the FDC37C93x logical devices as the IBM BIOS sets them (LPT 3BCh, LD8 GPIO
+  steering of IRQ14/15).
+
+SeaBIOS is built without board code (`NEWBIOS_BOARD_GENERIC`), with the cuts of `seabios.config`. Not yet (step 5):
+shadow write-protect, the LPT at 3BCh (SeaBIOS GENERIC probes 378h/278h only), MIDE PIO timings, P54C names and clock.
+
+| SIMMs (simm_configs.txt) | IBM BIOS | ours |
+|---|---|---|
+| 2 x 16 MB double-sided 2Mx32 sides (`8 0`) | one 32 MB bank (05h), aliases, hangs at POST A7h | two 16 MB banks (CCh), 32 MB |
+| 2 x 32 MB single-sided 8Mx32 (`10 0`) | 32 MB of 64 (MA11 is RAS4#) | the same, and POST 33h |
+| a faulty bit at 7F0000h (`4 0`) | its memory count: 7168 KB | the same, and POST 34h |
+
 POST codes (port 80h; the C ones after the bootblock has enabled COM1, i.e. 30h, also on COM1 at 115200 8N1):
 
 | Code | Step that starts |
 |---|---|
 | `01` `03` `04` `10` | reset vector, IDT/GDT, protected mode, 32-bit code |
-| `21` `22` `23` | cache-as-RAM: L1 on, reading 1A0000h-1A1FFFh into it (the 82C557M's reset 2 MB of DRAM), CD = NW = 1 |
+| `21` `22` `23` | cache-as-RAM: bank 0 = 2 MB, A20, L1 on, reading 1A0000h-1A1FFFh into it, CD = NW = 1 |
 | `26` | DRAM decode off (82C557M 13h = 88h): the range now exists only in L1 |
 | `29` / `2A` | CAR self-test (each dword its address, then the complement) passed / **failed: halted** |
 | `27` `28` | cache-as-RAM zeroed, stack in it |
 | `14` `15` | bootblock C code, BIST passed |
-| `16` `17` `18` | northbridge (nothing), 82C558M: the whole flash below 4 GiB (ROMCS# 4Bh), CPU |
+| `16` `17` `18` | northbridge (E/F shadow off), 82C558M (ROMCS#), CPU |
 | `19` | romstage looked up in CBFS; then the FDC37C93x keyboard controller and COM1 are enabled |
-| `30` | romstage: the skeleton halts here |
+| `30` | romstage: 82C557M/82C558M registers, bus clock |
+| `32` | DRAM sizing and memory count |
+| `33` | warning: a SIMM holds more than the 82C557M addresses, the rest is unused |
+| `34` | warning: a 64 KiB block failed the memory count, the DRAM ends at the MiB below it |
+| `3E` | **no usable DRAM (2 MiB at least): halted** |
+| `3C` `3D` | postcar, cache-as-RAM left |
+| `38` | shadow RAM C0000-FFFFF; then ramstage (coreboot's codes) and SeaBIOS (`B0`-`BD`) |
 
 ## Flashing from Linux
 

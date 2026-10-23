@@ -1,4 +1,5 @@
 #!/bin/bash
+# run_all: alone (it uses every core; timing tests next to it fail)
 # Native (no emulator) fuzz of the CMOS values coreboot reads (src/mainboard/biostar/mb8433/newbios.c):
 # romstage chipset options, ramstage Auto timings, PCI IRQ presets through the PIRQ routing; compiled
 # unchanged against CMOS, PCI and PIT seams, with array bounds, division and shifts trapping.

@@ -1,4 +1,5 @@
 #!/bin/bash
+# run_all: alone (it uses every core; timing tests next to it fail)
 # Native (no emulator) test of coreboot's UM8881 DRAM and L2 sizing (raminit.c, memmap.c, the romstage
 # defaults) and of SeaBIOS's L2 enable at POST (setup_l2_cache in setup.c), compiled unchanged, against a
 # C port of the 86Box fork's DRAM/L2 model plus a normal-mode L2 (test/native/um8881_model.c): every

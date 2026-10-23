@@ -8,26 +8,12 @@
 # model's faulty bit; the BIOS sizes in 64 KB steps with 55AA55AAh).
 # The operator's board: 2 x 8 MB double-sided in SIMM1/SIMM2, 2 x 4 MB in SIMM5/SIMM6: "5 4" if SIMM1/SIMM2 is J23/J24,
 # "4 5" if it is J27/J28 (not known yet).
-# usage: ramoracle.sh (all) | ramoracle.sh <one config line>
-#   line: SIMM types of the pairs J23/J24 and J27/J28 (opti55x.c), memory KB or hang@<code>, 13h 14h 19h [unusable|stuck=<hex>:<bit>]
+# usage: ramoracle.sh (all, from simm_configs.txt) | ramoracle.sh <one line of simm_configs.txt>
 bd=$(dirname "$(dirname "$(readlink -f "$0")")")
 . "$bd/../../test/lib.sh"
 vm_dir=$nb/test/vm/aptiva2168-ramoracle
 [ -f "$bd/BIOSORIGINAL.bin" ] || fail "no $bd/BIOSORIGINAL.bin (the board's BIOS dump)"
-configs="4 0 8192 8b 80 88
-0 4 8192 88 83 88
-4 4 16384 8b 83 88
-5 0 16384 bb 80 88
-2 0 4096 99 80 88
-1 2 6144 89 91 88
-3 6 20480 8a 84 88
-4 5 24576 8b b3 88
-5 4 24576 bb 83 88
-7 9 98304 8d d5 88
-9 9 131072 dd d5 88
-8 0 hang@A7 8d 80 88 unusable
-10 0 32768 8d 80 88 unusable
-4 0 7168 8b 80 88 stuck=7f0000:1"
+configs=$(grep -v '^#' "$bd/test/simm_configs.txt")
 if [ $# -eq 0 ]; then
   mkdir -p "$vm_dir"
   xargs -P 6 -L 1 "$0" <<< "$configs" > "$vm_dir/all.log" 2>&1 || true
@@ -40,8 +26,8 @@ fi
 tag="$1_$2"
 vm_dir=$vm_dir/$tag
 vm_machine=aptiva2168 vm_ram=$(opti_ram_cfg "$1" "$2")
-if [[ ${7:-} == stuck=* ]]; then
-  stuck=${7#stuck=}
+stuck=$(grep -oE 'stuck=[0-9a-f]+:[0-7]' <<< "$*" | cut -d= -f2) || true
+if [ -n "$stuck" ]; then
   vm_ram+=$'\n'"stuck_addr = $((16#${stuck%:*}))"$'\n'"stuck_bit = ${stuck#*:}"
   tag+="_stuck"
 fi
