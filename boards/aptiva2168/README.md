@@ -1,7 +1,7 @@
 # IBM Aptiva A90 (machine type 2168, Type I-2 system board)
 
 The second board of this repository. Status: emulated in the 86Box fork with the original IBM BIOS; the coreboot and
-SeaBIOS port is at step 5 of its plan (below): our ROM, with SeaBIOS's board code, boots DOS and Linux in the
+SeaBIOS port is at step 6 of its plan (below; the bring-up ROM is ready for the board, `BRINGUP.md`): our ROM, with SeaBIOS's board code, boots DOS and Linux in the
 emulator, from USB without a PS/2 keyboard as the operator's board needs. The board's photos, IBM manuals, datasheets, the BIOS analysis and the
 port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`,
 `docs/port/PORT_PLAN.md`).
@@ -54,6 +54,9 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no PS/2 keyboard: the operator's case), `usbkbd`,
   `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`, `kbdpower`, `cmoslayout`. Not `flashtime`: no flash
   writes on this board (PORT_PLAN D5).
+- `bringup.sh` (step 6): the bring-up ROM's COM1 log in order (bootblock, CAR self-test, romstage, DRAM bank codes and
+  size, postcar, ramstage, SeaBIOS's log, its screen) on 2 SIMM configurations, the operator's 24 MB with a USB
+  keyboard and the RTL8139 socket ROM.
 - Tests start an A90 with `vm_machine=aptiva2168 vm_start` (`test/lib.sh`, SIMMs by `opti_ram_cfg`);
   `BOX86_USB`/`BOX86_USB_KBD`/`BOX86_USB_DISK` add the VIA USB card as on the MB-8433.
 
@@ -64,6 +67,8 @@ Trident VGA BIOS X5.3B as `boards/aptiva2168/vgabios.bin` (a link to the Aptiva 
 `docs/bios-extract/trident_tgui9680_vgabios_X5.3B_1996-02-29.bin`; IBM's, never in git, sha256 checked), stored as
 CBFS `pci1023,9660.rom.lzma` (SeaBIOS decompresses a file by that suffix). The build fails when something does not fit
 and prints the free bytes (12,292 at step 4, 9,732 at step 5).
+It also builds `out/aptiva2168-bringup.rom` for the first runs on the board (step 6, `BRINGUP.md`): coreboot's console
+(INFO) and SeaBIOS's level 3 log on COM1, without the setup's diagnostic tools (292 bytes free).
 
 coreboot (`coreboot-486`: mainboard `ibm/aptiva2168`, northbridge `opti/viperm`, southbridge `opti/82c558m`, the
 FDC37C93x in `smscsuperio`):

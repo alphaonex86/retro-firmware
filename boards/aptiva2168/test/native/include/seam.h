@@ -16,6 +16,7 @@ typedef uint32_t u32;
 
 #define BIOS_EMERG 0
 #define BIOS_WARNING 4
+#define BIOS_INFO 6
 int printk(int level, const char *fmt, ...);
 void post_code(u8 value);
 
