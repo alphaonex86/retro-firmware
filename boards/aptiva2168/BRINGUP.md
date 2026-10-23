@@ -15,9 +15,8 @@ The T48 database has no TN28F010 entry: use the Intel `N28F010@PLCC32` (same ID 
 Label the chip (e.g. "bringup + date + git hash"). Keep the IBM MX28F1000QC-12 (BG2US0J) untouched and labelled: it
 is the fallback. Use a PLCC extractor; pin 1 (the notch) as the IBM chip.
 
-JP9 (flash jumper, normal 1-2): it switches the 12 V VPP (pin 1). The bring-up ROM never writes the flash, so the
-write-protect position is safer (an IBM tip reports stray flash writes on bus-master cycles), but which position that
-is is not documented: measure pin 1 against ground at each position (12 V = writable).
+JP9 (silkscreen: 1-2 write enable, 2-3 write disable): keep 2-3. The firmware never writes the flash, and an IBM tip
+reports stray flash writes on bus-master cycles.
 
 ## COM1
 
