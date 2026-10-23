@@ -9,6 +9,11 @@ export BOX86_USB_DISK=$vm_dir/usb.img
 vm_start usbboot "$rom" ""
 vm_end_of_post
 vm_wait_text "DOS-TEST-OK" 120
+# VT6212 EHCI (1106:3104 rev 63) async sleep 10 us, not 1 us: 4Bh bit 5 (it starved the CPU on the real card)
+vm_pci_byte 00:00.0 00 > /dev/null
+ehci=$(awk '$2 ~ /^00/ && $3 == "06" && $4 == "11" && $5 == "04" && $6 == "31" {print $1}' "$vm/pci.txt")
+[ -n "$ehci" ] || fail "no VT6212 EHCI in the PCI dump"
+[ $((0x$(vm_pci_byte "$ehci" 4b) & 0x20)) = 32 ] || fail "VT6212 EHCI 4Bh bit 5 clear (1 us async sleep)"
 for n in 1 2; do
   vm_cad
   vm_wait_text "DOS-TEST-OK" 120
