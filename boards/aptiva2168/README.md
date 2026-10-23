@@ -1,7 +1,7 @@
 # IBM Aptiva A90 (machine type 2168, Type I-2 system board)
 
 The second board of this repository. Status: emulated in the 86Box fork with the original IBM BIOS; the coreboot and
-SeaBIOS port is at step 3 of its plan (below). The board's photos, IBM manuals, datasheets, the BIOS analysis and the
+SeaBIOS port is at step 3 of its plan (below; step 2, the emulator's P54C cache-as-RAM, is done too). The board's photos, IBM manuals, datasheets, the BIOS analysis and the
 port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`,
 `docs/port/PORT_PLAN.md`).
 
@@ -11,7 +11,7 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
 |---|---|---|
 | Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box) |
 | DRAM | 4 x 72-pin SIMM in two pairs, J23/J24 (RAS0#/RAS1#, inferred) and J27/J28 (RAS2#/RAS3#) | flat RAM; with a pair set in `[OPTi 82C55x (Viper)]` `pair0`/`pair1`, the 82C557M decode (13h/14h/19h, MA map, aliases, absent banks, `stuck_addr`/`stuck_bit`) |
-| CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks |
+| CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks; with a SIMM pair set, its L1 data cache as RAM (CR0.CD/NW, `src/cpu/cache_l1.c`: 8 KB 2-way 32-byte lines, LRU, KEN# and WB/WT# from the 82C557M) |
 | Bus-speed jumper JP2 | on the FDC37C933 GPIO GP21/GP20, read at EAh (index 2) / EBh: 00 66, 10 60, 11 50 MHz | Super I/O GPIO input, follows the configured bus |
 | Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci` |
 | PCI slots | riser, devices 07h/0Bh/0Ch; INTA: 0Bh -> PIRQ0, 07h/0Ch -> PIRQ1 (as the IBM BIOS routes) | same |
@@ -27,7 +27,10 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   its POST errors (161/163 from a new CMOS; 127 where the IBM CPU speed check rejects the CPU: P75, P90, P100).
 - `boards/aptiva2168/test/flashlinux.sh`: the BIOS update from Linux below, on the emulated TN28F010.
 - `boards/aptiva2168/test/skeleton.sh`: our ROM sends exactly the POST codes of the skeleton below, up to 30h, and 30h
-  on COM1.
+  on COM1, on the DRAM model: its CAR self-test holds only in the L1 model.
+- `boards/aptiva2168/test/car.sh`: the probe ROM `car.asm` checks the L1 model: CAR with CD/NW, a write outside the CAR
+  lines lost, more than 8 KiB evicting the least recently used way, code fetches apart, INVD losing Modified lines,
+  WBINVD writing them back, no fill outside KEN#; on flat RAM (no model) it must fail.
 - `boards/aptiva2168/test/ramoracle.sh`: the IBM BIOS on 13 SIMM configurations of the DRAM model: the memory its
   Setup shows and its 13h/14h/19h, the oracle for our raminit. SIMMs it cannot size: 2 x 32 MB 8Mx32 (MA11 is RAS4#)
   gives 32 MB; 2 x 16 MB double-sided (2Mx32 sides) hangs its memory test at 16 MB (POST A7, an alias overwrites low

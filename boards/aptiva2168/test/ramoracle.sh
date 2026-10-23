@@ -6,6 +6,8 @@
 # configured size, which the bank codes add up to; "unusable" lines are its own choice, hang@<POST code>: its memory
 # test stops there for good (an alias overwrites low memory); stuck=<address>:<bit>: that RAM bit reads 0 (the
 # model's faulty bit; the BIOS sizes in 64 KB steps with 55AA55AAh).
+# The operator's board: 2 x 8 MB double-sided in SIMM1/SIMM2, 2 x 4 MB in SIMM5/SIMM6: "5 4" if SIMM1/SIMM2 is J23/J24,
+# "4 5" if it is J27/J28 (not known yet).
 # usage: ramoracle.sh (all) | ramoracle.sh <one config line>
 #   line: SIMM types of the pairs J23/J24 and J27/J28 (opti55x.c), memory KB or hang@<code>, 13h 14h 19h [unusable|stuck=<hex>:<bit>]
 bd=$(dirname "$(dirname "$(readlink -f "$0")")")
@@ -20,6 +22,7 @@ configs="4 0 8192 8b 80 88
 1 2 6144 89 91 88
 3 6 20480 8a 84 88
 4 5 24576 8b b3 88
+5 4 24576 bb 83 88
 7 9 98304 8d d5 88
 9 9 131072 dd d5 88
 8 0 hang@A7 8d 80 88 unusable
