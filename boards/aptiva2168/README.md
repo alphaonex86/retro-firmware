@@ -43,6 +43,9 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   floating bus and a faulty bit at every dword the sizing reads and at random addresses (1.36 million cases, about
   12 s on 16 cores): the best top the chipset can address, one-to-one decode, same registers with a faulty bit,
   no access to the cache-as-RAM lines, the POST codes; then `simm_configs.txt`.
+- `boards/aptiva2168/test/dramprobe.sh`: native, `tools/dramprobe.c` (the Linux probe of J27/J28 on the real board:
+  bank placement per code, the IBM count, our probe, aliasing address lines and failing data bits per SIMM, a full
+  test; only 14h, interrupts off) on the DRAM model: the operator's SIMMs, then a faulty bit.
 - `boards/aptiva2168/test/post.sh`: our ROM to SeaBIOS's text screen (Trident VGA BIOS from CBFS, POST memory test,
   summary, boot attempts), then the same POST codes after Ctrl+Alt+Del.
 - Step 5, SeaBIOS's board code: `cpu.sh` (each P54C setting: name, TSC clock, JP2 bus and multiplier), `shadow.sh`
