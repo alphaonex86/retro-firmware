@@ -11,6 +11,7 @@ usb_stick "$vm_dir/usb.img"
 export BOX86_USB_DISK=$vm_dir/usb.img BOX86_USB_KBD=1 BOX86_KBD_ABSENT=1
 key() { vm_cmd usbkey "$@"; }
 main="SAVE & EXIT SETUP"
+test1=$([ "${vm_machine:-}" = aptiva2168 ] && echo "MEMORY TEST" || echo "BOARD TEST")   # the first hardware test
 
 vm_start nokbd "$rom" ""
 vm_wait_text "Press F1 to continue" 90
@@ -21,7 +22,7 @@ key 4c                                              # DEL
 vm_wait_text "$main" 20
 sel=0
 for entry in "0 STANDARD CMOS SETUP" "1 BIOS FEATURES SETUP" "2 CHIPSET FEATURES SETUP" "3 POWER MANAGEMENT SETUP" \
-             "4 PNP/PCI CONFIGURATION" "5 INTEGRATED PERIPHERALS" "7 CHIPSET REGISTERS" "8 MEMORY" "9 BOARD TEST"; do
+             "4 PNP/PCI CONFIGURATION" "5 INTEGRATED PERIPHERALS" "7 CHIPSET REGISTERS" "8 MEMORY" "9 $test1"; do
   read -r i title <<< "$entry"
   for ((; sel < i; sel++)); do key 51; done         # down
   key 28                                            # Enter

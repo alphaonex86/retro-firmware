@@ -1,5 +1,5 @@
-# IBM Aptiva 2168-A90 (OPTi Viper-M, Pentium P54C on the 486 trees), sourced by build.sh. Port step 4: coreboot
-# up to SeaBIOS, SeaBIOS without board code (NEWBIOS_BOARD_GENERIC).
+# IBM Aptiva 2168-A90 (OPTi Viper-M, Pentium P54C on the 486 trees), sourced by build.sh: coreboot, SeaBIOS with
+# its board code (NEWBIOS_BOARD_APTIVA2168).
 # Needs the board's Trident TGUI9680 VGA BIOS (X5.3B, 32 KiB, not in git: it is IBM's), boards/aptiva2168/vgabios.bin
 # (the Aptiva project's docs/bios-extract/trident_tgui9680_vgabios_X5.3B_1996-02-29.bin, or a link to it): in CBFS as
 # pci1023,9660.rom.lzma, which SeaBIOS decompresses by that suffix.

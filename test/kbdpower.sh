@@ -21,6 +21,12 @@ done
 BOX86_KBC_POWERON_MS=0 BOX86_KBD_POWERON_MS=15000 vm_start kbdpower "$rom" ""
 vm_wait_text "boot continues \(no keyboard\)" 90     # nobody could press F1: the boot goes on
 vm_expect "Keyboard error"
-sleep 12                                            # left enabled, as the original BIOS: once awake it types
-vm_cad 60
+resets=$(vm_resets) end=$((SECONDS + 90))           # left enabled, as the original BIOS: once awake it types
+until [ "$(vm_resets)" -gt "$resets" ]; do          # awake 15 s of emulated time after power-on: behind the clock
+  [ $SECONDS -lt $end ] || fail "Ctrl+Alt+Del: no reset once the keyboard is awake"
+  vm_cmd combo 1d 38 53
+  sleep 2
+done
+until vm_rebooted "$resets"; do [ $SECONDS -lt $end ] || fail "no POST prompt after Ctrl+Alt+Del"; sleep 0.2; done
+vm_wait_text "Press DEL to enter SETUP" 10
 vm_stop

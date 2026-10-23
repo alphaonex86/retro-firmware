@@ -26,7 +26,8 @@ vm_end_of_post 60
 vm_setup
 vm_menu 1                                           # BIOS FEATURES SETUP
 vm_wait_text "1st Boot Device" 5
-vm_key $K_DOWN $K_DOWN $K_PGUP $K_PGUP              # Hard Disk -> Floppy -> USB
+vm_boot1
+vm_key $K_PGUP $K_PGUP                              # Hard Disk -> Floppy -> USB
 vm_expect "1st Boot Device +: USB"
 vm_save
 vm_wait_text "BOOTED-USB" 120

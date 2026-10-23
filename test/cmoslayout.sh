@@ -3,12 +3,15 @@
 # reach a board (the real board kept the old Floppy-first boot order). 1) The setting list and Defaults match the
 # fingerprint recorded for this NB_SIG_VALUE. 2) The previous layout's CMOS (Floppy first) loads the defaults
 # (Hard Disk first); the same CMOS with this layout's signature keeps Floppy first.
+# The Aptiva (vm_machine=aptiva2168): its own Defaults lines in the fingerprint.
 . "$(dirname "$0")/lib.sh"
-known="a7 4d46a367e61ad8a7"
+known="a7 4d46a367e61ad8a7" other='/^#elif CONFIG_NEWBIOS_CHIPSET_OPTI_VIPERM/,/^#endif/d'
+[ "${vm_machine:-}" != aptiva2168 ] || known="a7 70a79f979c33ff15" other='/^#if CONFIG_NEWBIOS_CHIPSET_UMC/,/^#elif/d'
 prev_sig=0xa6
 sig=$(sed -nE 's/^#define NB_SIG_VALUE +0x([0-9a-f]+).*/\1/p' "$nb/seabios-486/src/newbios_cmos.h")
-sum=$({ sed -n '/^enum nb_setting/,/^};/p' "$nb/seabios-486/src/newbios_cmos.h"; sed -n '/^static const u8 Defaults/,/^};/p' "$nb/seabios-486/src/setup.c"; } \
-  | grep -v '^[[:space:]]*#' | sed 's|/\*.*\*/||; s|//.*||' | tr -d ' \t\n' | sha256sum | cut -c1-16)   # board #if lines aside
+sum=$({ sed -n '/^enum nb_setting/,/^};/p' "$nb/seabios-486/src/newbios_cmos.h"; sed -n '/^static const u8 Defaults/,/^};/p' "$nb/seabios-486/src/setup.c" \
+  | sed "$other"; } \
+  | grep -v '^[[:space:]]*#' | sed 's|/\*.*\*/||; s|//.*||' | tr -d ' \t\n' | sha256sum | cut -c1-16)   # board #if lines and other boards aside
 [ "$sig $sum" = "$known" ] || {
   echo "FAIL [cmoslayout]: settings or Defaults changed: bump NB_SIG_VALUE in seabios-486/src/newbios_cmos.h, then set known=\"<sig> $sum\" here"
   exit 1

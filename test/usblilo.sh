@@ -1,7 +1,8 @@
 #!/bin/bash
 # LILO's 3 s boot prompt from a USB disk without an AT keyboard: the board's 8042 then hangs on the first byte sent
 # to the keyboard (IBF stays set). The countdown must still run out and Linux start (the board froze at "02s"):
-# with a USB keyboard, and with no keyboard at all (HALT_ON=1 ROM: Halt On: No Errors).
+# with a USB keyboard, and with no keyboard at all (MB-8433: HALT_ON=1 ROM, Halt On: No Errors; the Aptiva's ROM boots
+# on as no keyboard could press F1).
 . "$(dirname "$0")/lib.sh"
 mkdir -p "$vm_dir"
 usb_stick "$vm_dir/usb.img"
@@ -15,5 +16,5 @@ BOX86_USB_KBD=1 vm_start usblilo "$rom" ""
 vm_wait_text "Press F1 to continue" 90
 vm_cmd usbkey 3a                                    # F1 (fresh CMOS)
 lilo_runs_out "USB keyboard"
-vm_start usblilo "$nb/out/newbios-halt1.rom" ""
+vm_start usblilo "$([ "${vm_machine:-}" = aptiva2168 ] && echo "$rom" || echo "$nb/out/newbios-halt1.rom")" ""
 lilo_runs_out "no keyboard"

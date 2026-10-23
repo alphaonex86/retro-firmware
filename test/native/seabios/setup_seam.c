@@ -139,6 +139,11 @@ const char *fuzz_check_values(const u8 *values, char *why, int size)
     const struct item *it;
     int var;
     for (var = 0; var < NB_COUNT; var++) {
+        // the Aptiva has no L2 code and its chipset none of these UMC options: nothing reads them
+        if (FUZZ_VIPERM && (var == NB_L2_CACHE || var == NB_KBC_CLOCK || var == NB_EDO || var == NB_EARLY_CACHE_WRITE
+                            || var == NB_HOST_PCI_POST_WS || var == NB_HOST_PCI_BURST || var == NB_PCI_BUS_PARK
+                            || var == NB_PREEMPT_PCI || var == NB_DEVSEL))
+            continue;
         if (!item_of(var, &it)) {
             snprintf(why, size, "setting %d has no setup item: never range-checked", var);
             return why;

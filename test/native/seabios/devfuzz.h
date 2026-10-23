@@ -78,7 +78,9 @@ struct fuzz_pcidev {
 extern struct fuzz_pcidev fuzz_pci[FUZZ_PCI_MAX];
 extern int fuzz_npci;
 struct fuzz_pcidev *fuzz_pci_add(unsigned bdf, unsigned vendev, unsigned classrev, unsigned char header);
-void fuzz_pci_board(void);                      /* UMC host bridge, IBC and onboard IDE */
+void fuzz_pci_board(void);                      /* UMC host bridge, IBC and onboard IDE; the Aptiva's (FUZZ_VIPERM):
+                                                   82C557M with its index registers, 82C558M and MIDE */
+int fuzz_ide_on(int channel);                   /* the onboard IDE channel's decode is on */
 void fuzz_pci_model(void);
 unsigned fuzz_pci_read(unsigned bdf, unsigned reg);
 extern void (*fuzz_pci_command_hook)(unsigned bdf, unsigned command);   /* on each write of the command register */

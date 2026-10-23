@@ -3,12 +3,14 @@
 # size (CONFIG0 BS2-0, byte 14h): the operator's card had 000, so F8 offered no network boot on the real board
 # (86Box BOX86_RTL8139_EEPROM: its EEPROM dump); the same card with 64 KiB (tools/rtl8139-bootrom 64) offers it.
 # Then tools/rtl8139-bootrom in Linux (booted by that Etherboot) writes 000, 64 KiB, 000: after a reset, no network boot.
+# The Aptiva: the operator's 24 MB (the test Linux loaded by iPXE needs more than 16).
 . "$(dirname "$0")/lib.sh"
 mkdir -p "$vm_dir"
 dos_disk "$vm_dir/hdd.img"
 card=$nb/test/roms/rtl8139-operator-eeprom.txt   # the operator's card (not published)
 grep -q "^.*0a:4d10" "$card" || fail "$card: not the operator's EEPROM (word 0Ah 4D10h, no boot ROM)"
 sed 's/0a:4d10/0a:4d14/' "$card" > "$vm_dir/eeprom-64k.txt"
+[ "${vm_machine:-}" != aptiva2168 ] || vm_ram=$(opti_ram_cfg 5 4)
 
 boot_menu() {  # EEPROM dump -> the F8 boot menu on screen
   BOX86_RTL8139_EEPROM=$1 vm_start nicrom "$rom" "$(disk_cfg "$vm_dir/hdd.img")

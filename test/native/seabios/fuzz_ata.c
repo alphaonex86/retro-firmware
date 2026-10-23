@@ -313,7 +313,7 @@ static u8 status(struct drive *d)
 /* Who drives the bus for the selected device: itself, or a ghost answering for both numbers. */
 static int channel_off(struct channel *c)
 {
-	return c->disabled || !(fuzz_pci_read(0x91, 0x40) >> 8 & (c->base1 == 0x1f0 ? 0x80 : 0x40));
+	return c->disabled || !fuzz_ide_on(c->base1 != 0x1f0);
 }
 
 static struct drive *responder(struct channel *c)
@@ -745,6 +745,12 @@ static int healthy(const struct spec_drive *s)
 		&& (!s->atapi || (s->id[0] >> 8 & 0x1f) == 5);
 }
 
+/* A channel off by the model or in setup (the Aptiva's MIDE: NB_IDE_PRIMARY is the whole controller). */
+static int setup_channel_off(int ch)
+{
+	return Spec.disabled[ch] || !fuzz_setting(NB_IDE_PRIMARY + ch) || (FUZZ_VIPERM && !fuzz_setting(NB_IDE_PRIMARY));
+}
+
 static void check_detection(void)
 {
 	int seen[4] = { 0 };
@@ -766,7 +772,7 @@ static void check_detection(void)
 		if ((e->kind == 'C') != s->atapi)
 			fuzz_fail("ata%d-%d: %s registered as %s", pos / 2, pos & 1, s->atapi ? "ATAPI" : "ATA",
 				  e->kind == 'C' ? "CD" : "hard disk");
-		if (Spec.disabled[pos / 2] || !fuzz_setting(NB_IDE_PRIMARY + pos / 2))
+		if (setup_channel_off(pos / 2))
 			fuzz_fail("ata%d-%d registered on a channel switched off", pos / 2, pos & 1);
 		if (a->drive.sectors == 0 && e->kind == 'H')
 			fuzz_fail("ata%d-%d registered with 0 sectors", pos / 2, pos & 1);
@@ -782,7 +788,7 @@ static void check_detection(void)
 		const struct spec_drive *twin = &Spec.drive[pos ^ 1];
 		int found = seen[pos] || (!twin->present && (Spec.drive[pos].faults & F_GHOST) && seen[pos ^ 1]);
 		fuzz_ideinfo(pos, &info);
-		int off = Spec.disabled[pos / 2] || !fuzz_setting(NB_IDE_PRIMARY + pos / 2);
+		int off = setup_channel_off(pos / 2);
 		if (!found && healthy(&Spec.drive[pos]) && Spec.healthy_id && !off
 		    && Spec.hdd_type[pos] != NB_HDD_NONE)
 			fuzz_fail("working drive at ata%d-%d not detected", pos / 2, pos & 1);

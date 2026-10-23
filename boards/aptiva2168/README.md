@@ -1,7 +1,8 @@
 # IBM Aptiva A90 (machine type 2168, Type I-2 system board)
 
 The second board of this repository. Status: emulated in the 86Box fork with the original IBM BIOS; the coreboot and
-SeaBIOS port is at step 4 of its plan (below): our ROM boots to SeaBIOS in the emulator. The board's photos, IBM manuals, datasheets, the BIOS analysis and the
+SeaBIOS port is at step 5 of its plan (below): our ROM, with SeaBIOS's board code, boots DOS and Linux in the
+emulator, from USB without a PS/2 keyboard as the operator's board needs. The board's photos, IBM manuals, datasheets, the BIOS analysis and the
 port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `docs/bios-extract/README.md`,
 `docs/port/PORT_PLAN.md`).
 
@@ -43,35 +44,50 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   12 s on 16 cores): the best top the chipset can address, one-to-one decode, same registers with a faulty bit,
   no access to the cache-as-RAM lines, the POST codes; then `simm_configs.txt`.
 - `boards/aptiva2168/test/post.sh`: our ROM to SeaBIOS's text screen (Trident VGA BIOS from CBFS, POST memory test,
-  summary, boot attempts), then the same after Ctrl+Alt+Del.
+  summary, boot attempts), then the same POST codes after Ctrl+Alt+Del.
+- Step 5, SeaBIOS's board code: `cpu.sh` (each P54C setting: name, TSC clock, JP2 bus and multiplier), `shadow.sh`
+  (an ISA ROM at D8000 stays on the bus or is shadowed, C0000/E/F read-only after POST), `superio.sh` (IBM's COM/LPT
+  defaults, LPT 3BCh found, MIDE PIO timings, INTEGRATED PERIPHERALS), `chipset.sh` (CHIPSET FEATURES reach the
+  82C557M, Auto = the IBM BIOS's timing, fallback after unfinished POSTs, PCI IRQ, CHIPSET REGISTERS), `setup.sh`,
+  `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the PIRQ routing), `genericbuild.sh` (MB-8433 and Aptiva code
+  apart). The MB-8433 tests that hold for this board run on it through a wrapper (`vm_machine=aptiva2168`):
+  `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no PS/2 keyboard: the operator's case), `usbkbd`,
+  `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`, `kbdpower`, `cmoslayout`. Not `flashtime`: no flash
+  writes on this board (PORT_PLAN D5).
 - Tests start an A90 with `vm_machine=aptiva2168 vm_start` (`test/lib.sh`, SIMMs by `opti_ram_cfg`);
   `BOX86_USB`/`BOX86_USB_KBD`/`BOX86_USB_DISK` add the VIA USB card as on the MB-8433.
 
-## Our firmware (port step 4: up to SeaBIOS)
+## Our firmware (port step 5: SeaBIOS board code)
 
 `./build.sh aptiva2168` -> `out/aptiva2168.rom` (128 KiB; `boards/aptiva2168/firmware.sh`). It needs the board's
 Trident VGA BIOS X5.3B as `boards/aptiva2168/vgabios.bin` (a link to the Aptiva project's
 `docs/bios-extract/trident_tgui9680_vgabios_X5.3B_1996-02-29.bin`; IBM's, never in git, sha256 checked), stored as
 CBFS `pci1023,9660.rom.lzma` (SeaBIOS decompresses a file by that suffix). The build fails when something does not fit
-and prints the free bytes (12,292 at step 4).
+and prints the free bytes (12,292 at step 4, 9,732 at step 5).
 
 coreboot (`coreboot-486`: mainboard `ibm/aptiva2168`, northbridge `opti/viperm`, southbridge `opti/82c558m`, the
 FDC37C93x in `smscsuperio`):
 - bootblock: the whole flash at E0000 (romstage runs there) and at 4 GiB (ROMCS# 4Ah/4Bh), E/F shadow off (a CPU-only
-  reset keeps it), cache-as-RAM, the FDC37C93x keyboard controller and COM1.
+  reset keeps it), cache-as-RAM, the FDC37C93x keyboard controller, its RTC (off at reset; romstage reads the CMOS)
+  and COM1.
 - romstage: the IBM BIOS's 82C557M/82C558M register values without L2, DRAM timing and ATCLK by the JP2 bus clock
   (FDC37C93x GP21-GP20: 66/60 MHz 01h = DDh, 50 MHz or unknown FEh), refresh (PIT 1), DRAM sizing (`raminit.c`: each
   SIMM side probed for its row and column lines at bank code 7, then the largest code it fills, at most 5 as MA11 is
   RAS4#: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
-  memory count (a dword per 64 KiB; the DRAM ends at the MiB below a failing block).
-- postcar: L1 write-back; C0000-FFFFF shadow RAM read/write (SeaBIOS GENERIC cannot write-protect it), C0000/F0000
-  cacheable, no flash below 1 MiB.
+  memory count (a dword per 64 KiB; the DRAM ends at the MiB below a failing block), then the CHIPSET FEATURES values
+  (`newbios.c`, `NB_VIPERM_FIELDS`) unless Auto, an invalid CMOS or 2 unfinished POSTs.
+- postcar: L1 write-back; C0000-FFFFF shadow RAM read/write, C0000/F0000 cacheable, no flash below 1 MiB.
 - ramstage: PCI, PIRQ0-3# to IRQ10/11/10/11 level (IBM: 0Bh INTA PIRQ0#, 07h/0Ch INTA PIRQ1#; INTB-D by the IBM BIOS's
-  swizzle, `$PIR`), MIDE legacy mode, the FDC37C93x logical devices as the IBM BIOS sets them (LPT 3BCh, LD8 GPIO
-  steering of IRQ14/15).
+  swizzle, `$PIR`; a PCI IRQ set in setup kept if the 82C558M routes it), MIDE legacy mode, the FDC37C93x logical
+  devices as the IBM BIOS sets them (LPT 3BCh, LD8 GPIO steering of IRQ14/15).
 
-SeaBIOS is built without board code (`NEWBIOS_BOARD_GENERIC`), with the cuts of `seabios.config`. Not yet (step 5):
-shadow write-protect, the LPT at 3BCh (SeaBIOS GENERIC probes 378h/278h only), MIDE PIO timings, P54C names and clock.
+SeaBIOS (`NEWBIOS_BOARD_APTIVA2168`, chipset `NEWBIOS_CHIPSET_OPTI_VIPERM`, the cuts of `seabios.config`): BIOS name
+aptiva2168; Pentium names and the core clock by the TSC (the rating within 2%), the bus by JP2; shadow RAM per segment
+(82C557M 04h-06h): C8000-DFFFF blocks on the ISA bus unless an option ROM or "Shadow" in setup uses them, every
+segment read from DRAM read-only after POST; the FDC37C93x ports and the MIDE channels from INTEGRATED PERIPHERALS
+(defaults: IBM's), LPT 3BCh probed first; MIDE PIO timings from the drives' modes (40h the slowest up to mode 3, 43h
+PIO 4 per drive); CHIPSET FEATURES (DRAM timing, posted write, pipelining, slow refresh, BIOS caching), CHIPSET
+REGISTERS, the SIMM pairs on the CPU page; no L2 pages, no ESCD.
 
 | SIMMs (simm_configs.txt) | IBM BIOS | ours |
 |---|---|---|

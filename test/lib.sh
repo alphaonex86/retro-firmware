@@ -1,11 +1,13 @@
 # Test helpers: run a ROM on the emulated Biostar MB-8433UUD (86Box fork, machine 84xxuuda; vm_machine=aptiva2168:
 # the IBM Aptiva 2168) headless, drive it through the fork's test control FIFO and check the text screen / COM1.
 # Source it, then: vm_start <name> <rom> [extra 86box.cfg lines]; vm_wait_text ...; vm_stop
+# A test of test/ runs on the Aptiva with vm_machine=aptiva2168 in its environment (boards/aptiva2168/test wrappers):
+# its ROM, VM directory and name are then the Aptiva's.
 set -euo pipefail
 nb=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
 emu=${EMU:-$nb/build/86box/out/src/86Box}   # EMU: another 86Box build
-rom=${ROM:-$nb/out/newbios.rom}   # ROM=out/newbios-debug.rom for full COM1 logs
-vm_dir=$nb/test/vm/$(basename "$0" .sh)
+rom=${ROM:-$nb/out/$([ "${vm_machine:-}" = aptiva2168 ] && echo aptiva2168 || echo newbios).rom}   # ROM=out/newbios-debug.rom for full COM1 logs
+vm_dir=$nb/test/vm/${vm_machine:+$vm_machine-}$(basename "$0" .sh)
 [ -x "$emu" ] || "$nb/build_86box.sh" > /dev/null
 
 fail() { echo "FAIL [${vm_name:-$(basename "$0" .sh)}]: $*" >&2; [ -z "${vm:-}" ] || { echo "--- screen:"; cat "$vm/screen.txt" 2>/dev/null; } >&2; exit 1; }
@@ -31,6 +33,7 @@ vm_start() {  # name, rom, extra config lines; $vm_machine: 84xxuuda (default) o
     *) fail "unknown machine $machine";;
   esac
   vm_name=$1
+  [ "$machine" = 84xxuuda ] || [[ $1 == "$machine"* ]] || vm_name="$machine $1"
   vm=$vm_dir
   while [ "$(pgrep -cx 86Box)" -ge "$(nproc)" ]; do sleep 0.5; done   # one emulator per core: timing checks
   rm -rf "$vm/nvr" "$vm/post.log"   # fresh CMOS and flash, POST codes of this boot only
@@ -127,13 +130,18 @@ vm_ocr_expect() {  # extended regex the OCR text must show
 
 vm_key() { for k; do vm_cmd key "$k"; sleep 0.2; done; }   # set 1 scan codes (hex), typed one by one
 
+vm_resets() { grep -c '^RESET' "$vm/post.log"; }
+
+vm_rebooted() {  # resets before: a reset since, and its POST up to the prompt (POST code B8)
+  [ "$(vm_resets)" -gt "$1" ] && awk '/^RESET/ { p = 0 } /^B8$/ { p = 1 } END { exit !p }' "$vm/post.log"
+}
+
 vm_reboot() {  # command, [timeout]: a reset by the command, then the reboot's POST up to its prompt (POST code B8);
                # the old screen may still show any text the caller waits for
   local resets end=$((SECONDS + ${2:-60}))
-  resets=$(grep -c '^RESET' "$vm/post.log")
+  resets=$(vm_resets)
   $1
-  until [ "$(grep -c '^RESET' "$vm/post.log")" -gt "$resets" ] && awk '/^RESET/ { p = 0 } /^B8$/ { p = 1 }
-      END { exit !p }' "$vm/post.log"; do
+  until vm_rebooted "$resets"; do
     [ $SECONDS -lt $end ] || fail "$1: no reboot to the POST prompt"
     sleep 0.2
   done
@@ -146,8 +154,14 @@ vm_cad() {  # [timeout] Ctrl+Alt+Del, then the reboot's POST prompt
   vm_wait_text "Press DEL to enter SETUP" 10
 }
 
-vm_net_first() {  # in BIOS FEATURES SETUP: 1st boot device Hard Disk (default) -> CD-ROM -> Network
-  vm_key $K_DOWN $K_DOWN $K_PGDN $K_PGDN
+vm_boot1() {  # BIOS FEATURES SETUP just opened -> the cursor on 1st Boot Device (the Aptiva has no External Cache item)
+  vm_key $K_DOWN
+  [ "${vm_machine:-}" = aptiva2168 ] || vm_key $K_DOWN
+}
+
+vm_net_first() {  # BIOS FEATURES SETUP just opened: 1st boot device Hard Disk (default) -> CD-ROM -> Network
+  vm_boot1
+  vm_key $K_PGDN $K_PGDN
   vm_expect "1st Boot Device +: Network"
 }
 

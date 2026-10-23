@@ -8,22 +8,25 @@
 # (virtual time budget, CPU loop) or misbehave (checks per area).
 # usage: [SEABIOS=tree] devfuzz.sh   (default tree: the seabios-486 submodule, built in build/seabios-486/out-rel; failing cases: test/vm/devfuzz/failures.txt;
 #        rerun one with a stack trace: test/vm/devfuzz/devfuzz -v area index; one area: devfuzz -a area)
+#        vm_machine=aptiva2168: the Aptiva's SeaBIOS (build/seabios-486/out-aptiva), in test/vm/aptiva2168-devfuzz
 set -euo pipefail
 here=$(dirname "$(readlink -f "$0")")
 nb=$(dirname "$here")
 sb=${SEABIOS:-$nb/seabios-486}
-sbout=${SEABIOS_OUT:-$nb/build/seabios-486/out-rel}
+sbout=${SEABIOS_OUT:-$nb/build/seabios-486/out-$([ "${vm_machine:-}" = aptiva2168 ] && echo aptiva || echo rel)}
 src=$here/native/seabios
-out=$here/vm/devfuzz
+out=$here/vm/${vm_machine:+$vm_machine-}devfuzz
 mkdir -p "$out"
 
 [ -f "$sbout/autoconf.h" ] && [ -f "$sbout/rom.o" ] \
   || { echo "FAIL [devfuzz]: no SeaBIOS build in $sb (run build.sh)"; exit 1; }
 rom_max=$(nm "$sbout/rom.o" | awk '$3 == "final_readonly_start" {print "0x" $1}')
+board=$(grep -c '^#define CONFIG_NEWBIOS_CHIPSET_OPTI_VIPERM 1' "$sbout/autoconf.h" || true)   # 1: the Aptiva's
+pnp=$(grep -c '^#define CONFIG_PNPBIOS 1' "$sbout/autoconf.h" || true)
 [ -n "$rom_max" ] || { echo "FAIL [devfuzz]: final_readonly_start not in $sb/out-rel/rom.o"; exit 1; }
 
 # shift-base: GCC defines shifting into the sign bit, SeaBIOS relies on it
-common=(-m32 -O1 -g -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined
+common=(-m32 -O1 -g -ffunction-sections -fdata-sections -fno-omit-frame-pointer -fsanitize=address,undefined -DFUZZ_VIPERM="$board" -DFUZZ_PNPBIOS="$pnp"
         -fno-sanitize=null,alignment,pointer-overflow,shift-base -fno-sanitize-recover=all -I"$src")
 seabios=("${common[@]}" -ffreestanding -fno-builtin -fno-strict-aliasing -fno-delete-null-pointer-checks
          -DMODE16=0 -DMODESEGMENT=0 -DFUZZ_ROM_MAX="$rom_max" -DPNP_FLASH_BASE=0x60000000u -DFLASH_LOW_BASE=0x61000000u -iquote "$sbout" -iquote "$sb/src"
@@ -64,8 +67,8 @@ objcopy -L printf -L panic -L __dprintf -L __warn_timeout -L __warn_noalloc -L _
 gcc -m32 -fsanitize=address,undefined -Wl,--gc-sections "${objs[@]}" -o "$out/devfuzz"
 
 if "$out/devfuzz" -o "$out/failures.txt"; then
-  echo "PASS [devfuzz]"
+  echo "PASS [${vm_machine:+$vm_machine }devfuzz]"
 else
-  echo "FAIL [devfuzz]: see above and $out/failures.txt"
+  echo "FAIL [${vm_machine:+$vm_machine }devfuzz]: see above and $out/failures.txt"
   exit 1
 fi

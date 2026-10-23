@@ -4,12 +4,17 @@
 # prompt, the POST must reach DOS again; twice, then once from the setup utility. Then with the card left receiving by
 # a boot program (Etherboot loads iPXE, whose script opens net0 and stays at its shell) and LAN broadcasts arriving
 # every ms (86Box BOX86_NET_NOISE_MS): the card keeps writing them into RAM by DMA, the POST must still finish.
+# The Aptiva: its 1 Mbit flash and P166, the card in a riser slot.
 . "$(dirname "$0")/lib.sh"
 dos_disk "$vm_dir/hdd.img"
 net_boot_dir $'#!ipxe\nifopen net0\necho NIC-OPEN\nshell\n'
-export BOX86_FLASH=w49f002a BOX86_NET_NOISE_MS=1
-vm_cpu_family=am5x86 vm_cpu_speed=120000000 vm_cpu_multi=3
-vm_start warmboot "${rom%.rom}-2mbit.rom" "$(disk_cfg "$vm_dir/hdd.img")
+export BOX86_NET_NOISE_MS=1
+boot_rom=$rom
+if [ "${vm_machine:-}" != aptiva2168 ]; then
+  export BOX86_FLASH=w49f002a
+  vm_cpu_family=am5x86 vm_cpu_speed=120000000 vm_cpu_multi=3 boot_rom=${rom%.rom}-2mbit.rom
+fi
+vm_start warmboot "$boot_rom" "$(disk_cfg "$vm_dir/hdd.img")
 $(nic_cfg "$etherboot")"
 vm_end_of_post
 vm_wait_text "DOS-TEST-OK" 90

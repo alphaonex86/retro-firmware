@@ -355,7 +355,7 @@ static void check(void)
 		&& r->pnp == 1 && (!r->pnpoffset || r->pnpoffset == 0x40) && !r->nextoffset && Spec.cls != C_MANY;
 	if (valid && !fuzz_nromcalls)
 		fuzz_fail("a valid PnP option ROM was not run");
-	if (fuzz_pci_read(0x90, 0x54) >> 24)
+	if (!FUZZ_VIPERM && fuzz_pci_read(0x90, 0x54) >> 24)
 		fuzz_fail("IBC 57h changed to %02x (the flash's lower half decoded)", fuzz_pci_read(0x90, 0x54) >> 24);
 	int ran_flash = 0;
 	for (int c = 0; c < fuzz_nromcalls; c++)

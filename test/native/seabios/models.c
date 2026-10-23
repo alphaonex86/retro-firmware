@@ -1,13 +1,20 @@
 /* Board models shared by the areas: CMOS/RTC (70h/71h) and PCI configuration mechanism #1 (CF8h/CFCh)
    with BAR sizing, expansion ROM decoding and the UMC host bridge shadow register 54h, whose bits 2-7
-   route the 16 KiB blocks of C8000-DFFFF to the ISA bus (cleared) or to shadow RAM (set). */
+   route the 16 KiB blocks of C8000-DFFFF to the ISA bus (cleared) or to shadow RAM (set). The Aptiva's
+   (FUZZ_VIPERM): the 82C557M index registers (22h/24h), whose shadow read bits route the same blocks. */
 #define _GNU_SOURCE
 #include <string.h>
 #include <sys/mman.h>
 
 #include "devfuzz.h"
 
+#if FUZZ_VIPERM
+#define HOST_BRIDGE 0x00                        /* 0:0.0 */
+#define IDE 0xa0                                /* 0:14.0 */
+#else
 #define HOST_BRIDGE 0x80                        /* 0:10.0 */
+#define IDE 0x91                                /* 0:12.1 */
+#endif
 
 unsigned char fuzz_cmos[128];
 static unsigned char CmosIndex;
@@ -56,15 +63,68 @@ struct fuzz_pcidev *fuzz_pci_add(unsigned bdf, unsigned vendev, unsigned classre
 	return d;
 }
 
+static void route_isa(unsigned char old, unsigned char now);
+
+#if FUZZ_VIPERM
+static unsigned char ViperIndex, ViperReg[256];
+
+/* The C8000-DFFFF blocks read from shadow RAM, as UMC 54h bits 2-7: 04h bits 4, 6, 05h bits 0, 2, 4, 6. */
+static unsigned char viper_blocks(void)
+{
+	unsigned char blocks = 0;
+	for (int b = 0; b < 6; b++)
+		if ((b < 2 ? ViperReg[0x04] >> (4 + 2 * b) : ViperReg[0x05] >> (2 * b - 4)) & 1)
+			blocks |= 4 << b;
+	return blocks;
+}
+
+static unsigned viper_read(unsigned short port, int size)
+{
+	return port == 0x24 ? ViperReg[ViperIndex] : 0xff;
+}
+
+static void viper_write(unsigned short port, unsigned value, int size)
+{
+	if (port == 0x22) {
+		ViperIndex = value;
+	} else if (port == 0x24) {
+		unsigned char old = viper_blocks();
+		ViperReg[ViperIndex] = value;
+		route_isa(old, viper_blocks());
+	}
+}
+
+void fuzz_pci_board(void)
+{
+	static const struct fuzz_ports ports = { 0x22, 0x24, viper_read, viper_write };
+	fuzz_pci_add(HOST_BRIDGE, 0xc5571045, 0x06000000, 0);
+	fuzz_pci_add(0x08, 0xc5581045, 0x06010000, 0);
+	struct fuzz_pcidev *ide = fuzz_pci_add(IDE, 0xc6211045, 0x01018a00, 0);
+	ide->cfg[0x04] = 0x01;                      /* I/O decode on: both channels */
+	ViperReg[0x04] = 0xf3, ViperReg[0x05] = 0xff, ViperReg[0x06] = 0x3f;   /* as coreboot's postcar leaves them */
+	fuzz_claim(&ports);
+}
+
+int fuzz_ide_on(int channel)
+{
+	return (fuzz_pci_read(IDE, 0x04) & 1) && !(channel && (fuzz_pci_read(IDE, 0x40) & 0x08));
+}
+#else
 void fuzz_pci_board(void)
 {
 	struct fuzz_pcidev *hb = fuzz_pci_add(HOST_BRIDGE, 0x88811060, 0x06000000, 0);
 	hb->cfg[0x50] = 0x82;                       /* L2 256K on */
 	hb->cfg[0x54] = 0xfe;                       /* C0000-DFFFF: shadow RAM */
 	fuzz_pci_add(0x90, 0x886a1060, 0x06010000, 0x80);
-	struct fuzz_pcidev *ide = fuzz_pci_add(0x91, 0x673a1060, 0x01018000, 0);
+	struct fuzz_pcidev *ide = fuzz_pci_add(IDE, 0x673a1060, 0x01018000, 0);
 	ide->cfg[0x41] = 0xc0;                      /* both channels on */
 }
+
+int fuzz_ide_on(int channel)
+{
+	return fuzz_pci_read(IDE, 0x40) >> 8 & (channel ? 0x40 : 0x80);
+}
+#endif
 
 static struct fuzz_pcidev *pci_find(unsigned bdf)
 {
@@ -143,7 +203,7 @@ static void config_write(struct fuzz_pcidev *d, unsigned reg, unsigned value, in
 		rom_decode(d);
 	if (fuzz_pci_command_hook && reg <= 0x05 && reg + size > 0x04)
 		fuzz_pci_command_hook(d->bdf, d->cfg[0x04] | d->cfg[0x05] << 8);
-	if (d->bdf == HOST_BRIDGE && reg <= 0x54 && reg + size > 0x54) {
+	if (!FUZZ_VIPERM && d->bdf == HOST_BRIDGE && reg <= 0x54 && reg + size > 0x54) {
 		route_isa(old54, d->cfg[0x54]);
 	}
 }

@@ -5,14 +5,21 @@
 # with iPXE itself as the socket ROM (64 KiB, build/nic-rtl8139-ipxe-64k.rom) on the operator's card (its EEPROM dump
 # set to 64 KiB, its MAC): it loads pxelinux.0 (the host's syslinux) from the TFTP root, which boots the kernel
 # /mb-8433UUD/linux as the card's pxelinux.cfg/01-<MAC> says, as on the operator's /tftproot (no default file).
+# The Aptiva: its 1 Mbit flash, the operator's 24 MB (the test Linux loaded by iPXE needs more than 16), the card in a
+# riser slot.
 . "$(dirname "$0")/lib.sh"
 test_linux
 dos_disk "$vm_dir/hdd.img"
 net_boot_dir $'#!ipxe\nchain tftp://${next-server}/bzImage\n'
 cp "$nb/build/bzImage" "$vm_dir/tftp/bzImage"
-export BOX86_FLASH=w49f002a
+if [ "${vm_machine:-}" = aptiva2168 ]; then
+  boot_rom=$rom top="0x0000000001[67][0-9a-f]{5}" vm_ram=$(opti_ram_cfg 5 4)   # RAM top below 24 MB
+else
+  export BOX86_FLASH=w49f002a
+  boot_rom=${rom%.rom}-2mbit.rom top="0x0000000001[ef][0-9a-f]{5}"   # below 32 MB
+fi
 netboot() {  # socket ROM, regex of its banner, [regex of the serial log] -> DOS by default; network first: Linux
-  vm_start pxe "${rom%.rom}-2mbit.rom" "$(disk_cfg "$vm_dir/hdd.img")
+  vm_start pxe "$boot_rom" "$(disk_cfg "$vm_dir/hdd.img")
 $(nic_cfg "$1")"
 
   vm_end_of_post
@@ -32,7 +39,7 @@ $(nic_cfg "$1")"
     sleep 1
   done
   for re in ${3:+"$3"} "LINUX-TEST: 6\.18\." "BIOS-e820: \[mem 0x0000000000000000-0x000000000009[0-9a-f]{4}\] usable" \
-            "BIOS-e820: \[mem 0x0000000000100000-0x0000000001[ef][0-9a-f]{5}\] usable" "apm: BIOS version 1\.2" \
+            "BIOS-e820: \[mem 0x0000000000100000-$top\] usable" "apm: BIOS version 1\.2" \
             "8139too .* eth0: .* IRQ [0-9]+" "sda: sda1"; do
     grep -aEq "$re" "$vm/serial.log" || fail "serial log lacks /$re/"
   done

@@ -152,7 +152,11 @@ void cr0_mask(u32 off, u32 on) { Cr0 = (Cr0 & ~off) | on; }
 u16 cr0_vm86_read(void) { return Cr0; }
 u64 rdmsr(u32 index) { fuzz_fail("rdmsr %x on a 486", index); }
 void wrmsr(u32 index, u64 val) { fuzz_fail("wrmsr %x on a 486", index); }
+#if FUZZ_VIPERM
+u64 rdtscll(void) { return fuzz_now_us * 166; }   /* the Aptiva's P54C 166 */
+#else
 u64 rdtscll(void) { fuzz_fail("rdtsc on a 486"); }
+#endif
 u32 getesp(void) { return 0x7000; }
 void sgdt(struct descloc_s *desc) { }
 void lgdt(struct descloc_s *desc) { }
@@ -161,10 +165,17 @@ u8 set_a20(u8 cond) { return 1; }
 
 void __cpuid(u32 index, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
 {
+#if FUZZ_VIPERM
+	*eax = index ? 0x52c : 1;                   /* Pentium P54C, GenuineIntel */
+	*ebx = index ? 0 : 0x756e6547;
+	*ecx = index ? 0 : 0x6c65746e;
+	*edx = index ? 0x1bf : 0x49656e69;          /* FPU VME DE PSE TSC MSR MCE CX8 */
+#else
 	*eax = index ? 0x484 : 1;                   /* Am486DX4: family 4 */
 	*ebx = index ? 0 : 0x68747541;
 	*ecx = index ? 0 : 0x444d4163;
 	*edx = index ? 1 : 0x69746e65;
+#endif
 }
 
 void cpuid(u32 index, u32 *eax, u32 *ebx, u32 *ecx, u32 *edx)
