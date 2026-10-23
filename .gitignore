@@ -12,5 +12,7 @@
 # the operator's NIC EEPROM (its MAC address)
 /BIOSORIGINAL.bin
 /boards/*/BIOSORIGINAL.bin
+# The Aptiva's Trident VGA BIOS (IBM's, from its BIOS image): boards/aptiva2168/firmware.sh puts it in the ROM
+/boards/aptiva2168/vgabios.bin
 /test/roms/rtl8139-operator-eeprom.txt
 __pycache__/

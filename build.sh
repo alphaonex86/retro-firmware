@@ -26,9 +26,10 @@ trees() {  # coreboot submodule, SeaBIOS submodule: the trees of this board, and
 cb_obj() { echo "$nb/build/${cb##*/}/$1"; }          # tag -> coreboot build dir
 sb_out() { echo "$nb/build/${sb##*/}/out-$1"; }      # SeaBIOS name -> its build dir
 
-fresh() {  # build dir, source tree: a dir built from another commit of the tree goes (its dependency files are stale)
-  local c
-  c=$(git -C "$2" rev-parse HEAD)
+fresh() {  # build dir, source tree: a dir built from another state of the tree (commit or uncommitted changes) goes:
+  local c   # its dependency files are stale (e.g. after a Kconfig change)
+  c=$(git -C "$2" rev-parse HEAD
+      { git -C "$2" diff HEAD; git -C "$2" ls-files -z --others --exclude-standard | (cd "$2" && xargs -0r cat); } | sha1sum)
   [ "$(cat "$1/.commit" 2>/dev/null)" = "$c" ] || { rm -rf "${1:?}"; mkdir -p "$1"; echo "$c" > "$1/.commit"; }
 }
 

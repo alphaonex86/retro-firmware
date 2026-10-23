@@ -1,5 +1,5 @@
-# Test helpers: run a ROM on the emulated Biostar MB-8433UUD (86Box fork, machine 84xxuuda) headless,
-# drive it through the fork's test control FIFO and check the text screen / COM1.
+# Test helpers: run a ROM on the emulated Biostar MB-8433UUD (86Box fork, machine 84xxuuda; vm_machine=aptiva2168:
+# the IBM Aptiva 2168) headless, drive it through the fork's test control FIFO and check the text screen / COM1.
 # Source it, then: vm_start <name> <rom> [extra 86box.cfg lines]; vm_wait_text ...; vm_stop
 set -euo pipefail
 nb=$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")
@@ -14,36 +14,48 @@ ram_cfg() {  # SIMM types of banks 0-3 (0 empty, see umc_hb4.c), L2 KB, L2 banks
   printf '[UMC HB4(8881F)]\nbank0 = %s\nbank1 = %s\nbank2 = %s\nbank3 = %s\nl2_cache = %s\nl2_banks = %s\n' "$@"
 }
 
-vm_start() {  # name, rom, extra config lines; RAM: $vm_ram (default 32 MB in bank 0, 256 KB L2),
-              # CPU: $vm_cpu_family/speed/multi (default Am5x86-133), $vm_dynarec (0: interpreter);
+opti_ram_cfg() {  # SIMM types of the pairs J23/J24 and J27/J28 (0 empty, see opti55x.c) -> 86Box config lines
+  printf '[OPTi 82C55x (Viper)]\npair0 = %s\npair1 = %s\n' "$@"
+}
+
+vm_start() {  # name, rom, extra config lines; $vm_machine: 84xxuuda (default) or aptiva2168;
+              # RAM: $vm_ram (default MB-8433 32 MB in bank 0, 256 KB L2; Aptiva 16 MB in J23/J24),
+              # CPU: $vm_cpu_family/speed/multi (default Am5x86-133, Aptiva P166), $vm_dynarec (0: interpreter);
               # $vm_other: lines of [Other peripherals] (86Box reads only the first section of a name);
-              # $vm_gfx: the video card (default tgui9440_pci)
+              # $vm_gfx: the video card (default tgui9440_pci, Aptiva its on-board TGUI9680)
+  local machine=${vm_machine:-84xxuuda} rom_file cpu ram gfx board="" kbd=keyboard_at mouse=none
+  case $machine in
+    84xxuuda) rom_file=uud0520s.bin cpu=(am5x86 133333333 4) ram=$(ram_cfg 5 0 0 0 256 1) gfx=tgui9440_pci;;
+    aptiva2168) rom_file=BG2US0J.BIN cpu=(pentium_p54c 166666666 2.5) ram=$(opti_ram_cfg 5 0) gfx=internal
+      board=$'\n\n[Trident TGUI 9680XGi On-Board PCI #1]\nmemory = 1' kbd=keyboard_ps2 mouse=ps2;;
+    *) fail "unknown machine $machine";;
+  esac
   vm_name=$1
   vm=$vm_dir
   while [ "$(pgrep -cx 86Box)" -ge "$(nproc)" ]; do sleep 0.5; done   # one emulator per core: timing checks
   rm -rf "$vm/nvr" "$vm/post.log"   # fresh CMOS and flash, POST codes of this boot only
-  [ -z "${vm_nvr:-}" ] || { mkdir -p "$vm/nvr"; cp "$vm_nvr" "$vm/nvr/84xxuuda.nvr"; }   # given CMOS contents
-  mkdir -p "$vm/roms/machines/84xxuuda"
-  cp "$2" "$vm/roms/machines/84xxuuda/uud0520s.bin"   # -R paths are searched before the default ROM set
+  [ -z "${vm_nvr:-}" ] || { mkdir -p "$vm/nvr"; cp "$vm_nvr" "$vm/nvr/$machine.nvr"; }   # given CMOS contents
+  mkdir -p "$vm/roms/machines/$machine"
+  cp "$2" "$vm/roms/machines/$machine/$rom_file"   # -R paths are searched before the default ROM set
   cat > "$vm/86box.cfg" <<EOF
 [Machine]
-machine = 84xxuuda
-cpu_family = ${vm_cpu_family:-am5x86}
-cpu_speed = ${vm_cpu_speed:-133333333}
-cpu_multi = ${vm_cpu_multi:-4}
+machine = $machine
+cpu_family = ${vm_cpu_family:-${cpu[0]}}
+cpu_speed = ${vm_cpu_speed:-${cpu[1]}}
+cpu_multi = ${vm_cpu_multi:-${cpu[2]}}
 cpu_use_dynarec = ${vm_dynarec:-1}
 fpu_type = internal
 mem_size = 131072
 time_sync = disabled
 
-${vm_ram:-$(ram_cfg 5 0 0 0 256 1)}
+${vm_ram:-$ram}
 
 [Video]
-gfxcard = ${vm_gfx:-tgui9440_pci}
+gfxcard = ${vm_gfx:-$gfx}$board
 
 [Input devices]
-keyboard_type = keyboard_at
-mouse_type = none
+keyboard_type = $kbd
+mouse_type = $mouse
 
 [Ports (COM & LPT)]
 serial1_device = pipe
