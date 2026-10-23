@@ -7,7 +7,9 @@
  *  - per code 1-5 of each side: the address lines that alias, the data bits that fail per SIMM (low/high dword);
  *  - every dword of the pair at the IBM BIOS's code, with its address and then the complement.
  * Only 14h changes, interrupts off (iopl 3: cli), and it is back before they are on: PCI BARs above the firmware's
- * DRAM top lie in that range; an MB holding a BAR under 1 MB (device registers) is never written. Build for the 486/P5 (static, uClibc), e.g. with the HDD image's toolchain:
+ * DRAM top lie in that range. Only what 14h decodes is accessed: the 82C557M forwards to PCI only the memory cycles
+ * its DRAM does not take (data book 3.4, M/IO#), so no device sees them.
+ * Build for the 486/P5 (static, uClibc), e.g. with the HDD image's toolchain:
  *   i486-buildroot-linux-uclibc-gcc -O2 -static -o dramprobe tools/dramprobe.c
  * boards/aptiva2168/test/dramprobe.sh runs it on the DRAM model (-DMODEL).
  */
@@ -28,7 +30,7 @@ extern struct model *model;
 #define interrupts(on) ((void)0)
 #define FULL_STEP 0x10000	/* the model's store holds 16K dwords */
 static uint32_t base;
-static uint32_t rd(uint32_t a) { return model_read32(model, base + a); }
+static uint32_t read_dword(uint32_t a) { return model_read32(model, base + a); }
 static void write_dword(uint32_t a, uint32_t v) { model_write32(model, base + a, v); }
 int dramprobe_main(int argc, char **argv);
 #define main dramprobe_main
@@ -42,7 +44,7 @@ int dramprobe_main(int argc, char **argv);
 #define FULL_STEP 4
 static uint32_t base;
 static volatile uint32_t *win;
-static uint32_t rd(uint32_t a) { return win[a / 4]; }
+static uint32_t read_dword(uint32_t a) { return win[a / 4]; }
 static void write_dword(uint32_t a, uint32_t v) { win[a / 4] = v; }
 static void interrupts(int on)
 {
@@ -54,12 +56,28 @@ static void interrupts(int on)
 #endif
 
 static uint8_t reg14;	/* 14h as the firmware left it */
-static uint8_t busy[WINDOW / MB];	/* MBs of the window with device registers */
+static uint32_t decoded;	/* bytes of the pair 14h decodes now */
+
+/* Bytes of the two banks of a pair register (13h, 14h): code n = 1 MB << n per bank */
+static uint32_t pair_size(uint8_t reg)
+{
+	uint32_t size = 0;
+
+	for (int bank = 0; bank < 2; bank++)
+		size += reg >> 4 * bank & 7 ? MB << (reg >> 4 * bank & 7) : 0;
+	return size;
+}
 
 static void wr(uint32_t a, uint32_t v)
 {
-	if (!busy[a / MB])
+	if (a < decoded)
 		write_dword(a, v);
+}
+
+/* Above the decode it floats high, as an unclaimed read */
+static uint32_t rd(uint32_t a)
+{
+	return a < decoded ? read_dword(a) : 0xffffffff;
 }
 
 /* 14h, then 128 refresh toggles of port 61h bit 4 (about 2 ms), as the IBM BIOS */
@@ -68,6 +86,7 @@ static void decode(uint8_t value)
 	uint8_t last = refresh_bit();
 
 	reg_write(0x14, value);
+	decoded = pair_size(value);
 	for (int toggles = 0, reads = 0; toggles < 128 && reads < 100000; reads++) {
 		uint8_t now = refresh_bit();
 		toggles += now != last;
@@ -87,7 +106,7 @@ static void leave(void)
 	interrupts(1);
 }
 
-/* Which MB of the window each MB shows: its own ('o'), another's ('a'), nothing ('.'); '-': not written */
+/* Which MB of the window each MB shows: its own ('o'), another's ('a'), nothing ('.'); '-': not decoded */
 static void map(uint8_t value)
 {
 	char line[WINDOW / MB + 1] = { 0 };
@@ -99,7 +118,7 @@ static void map(uint8_t value)
 	}
 	for (uint32_t mb = 0; mb < WINDOW / MB; mb++) {
 		uint32_t v = rd(mb * MB + 0xf0);
-		line[mb] = busy[mb] ? '-' : v == (0x5a000000 | mb) ? 'o' : (v & 0xffffff80) == 0x5a000000 ? 'a' : '.';
+		line[mb] = mb * MB >= decoded ? '-' : v == (0x5a000000 | mb) ? 'o' : (v & 0xffffff80) == 0x5a000000 ? 'a' : '.';
 	}
 	leave();
 	printf("map 14h=%02x %s\n", value, line);
@@ -212,10 +231,8 @@ static void lines(int side, int code)
 /* Every FULL_STEP of the pair at code byte: its address, then the complement; the first 8 errors */
 static void full(uint8_t code)
 {
-	uint32_t size = 0, errors = 0;
+	uint32_t size = pair_size(code), errors = 0;
 
-	for (int bank = 0; bank < 2; bank++)
-		size += code >> 4 * bank & 7 ? MB << (code >> 4 * bank & 7) : 0;
 	if (!size)
 		return;
 	enter(0x80 | code);
@@ -236,7 +253,7 @@ static void full(uint8_t code)
 		printf("  %08x: bits %08x wrong\n", first[i][0], first[i][1]);
 }
 
-/* The end of the RAM Linux uses (top-level System RAM of /proc/iomem); busy[]: the MBs with ranges under 1 MB */
+/* The end of the RAM Linux uses (top-level System RAM of /proc/iomem) */
 static uint32_t linux_ram_top(void)
 {
 #ifdef MODEL
@@ -255,10 +272,6 @@ static uint32_t linux_ram_top(void)
 			continue;
 		if (line[0] != ' ' && strstr(line, ": System RAM") && last + 1 > top)
 			top = last + 1;
-		if (!strstr(line, "System RAM") && last - first + 1 < MB)
-			for (unsigned long long mb = first / MB; mb <= last / MB; mb++)
-				if (mb >= base / MB && mb < (base + WINDOW) / MB)
-					busy[mb - base / MB] = 1;
 	}
 	fclose(f);
 	if (!top) {
@@ -284,9 +297,7 @@ int main(int argc, char **argv)
 #endif
 	uint8_t r13 = reg_read(0x13), r19 = reg_read(0x19);
 	reg14 = reg_read(0x14);
-	base = 0;
-	for (int bank = 0; bank < 2; bank++)
-		base += r13 >> 4 * bank & 7 ? MB << (r13 >> 4 * bank & 7) : 0;
+	base = pair_size(r13);
 	uint32_t ram_top = linux_ram_top();
 	printf("82C557M 13h %02x 14h %02x 19h %02x: J27/J28 from %u MB; Linux RAM ends at %u KB\n", r13, reg14, r19,
 	       base / MB, ram_top / 1024);

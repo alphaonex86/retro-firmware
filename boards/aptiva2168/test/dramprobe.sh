@@ -13,7 +13,7 @@ expect() { grep -qE "$2" "$out/$1.txt" || fail "$1: no '$2' in $out/$1.txt"; }
 
 "$out/dramprobe" 5 4 bb 83 88 > "$out/clean.txt" || fail "clean: exit $?"
 expect clean '^82C557M 13h bb 14h 83 19h 88: J27/J28 from 16 MB'
-expect clean '^map 14h=83 o{8}\.{120}$'
+expect clean '^map 14h=83 o{8}-{120}$'
 expect clean '^IBM count at 14h=d5: 8 MB, side B check not needed: code byte 03$'
 expect clean '^ours side A: code 3 '
 expect clean '^ours side B: code 0 '
