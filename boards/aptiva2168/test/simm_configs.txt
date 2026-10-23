@@ -16,5 +16,5 @@
 7 9 98304 8d d5 88
 9 9 131072 dd d5 88
 8 0 hang@A7 8d 80 88 unusable ours=32768,cc,80,88
-10 0 32768 8d 80 88 unusable partial
+10 0 32768 8d 80 88 unusable
 4 0 7168 8b 80 88 stuck=7f0000:1

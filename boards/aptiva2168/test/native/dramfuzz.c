@@ -28,7 +28,7 @@ void viperm_dram_init(void);
 static struct model *m;
 static jmp_buf halted;
 static uint8_t codes[256];
-static int code_count, bad_port, car_touched;
+static int code_count, bad_port, car_touched, bad_decode;
 static uint32_t reads[4096];
 static int read_count, recording;
 
@@ -67,8 +67,13 @@ void outb(u8 value, u16 port)
 {
 	if (port == 0x22)
 		m->idx = value;
-	else if (port == 0x24)
+	else if (port == 0x24) {
 		m->regs[m->idx] = value;
+		/* IBM never decodes code 6/7 or MA11 as MA11; probing so missized the real board's 1Mx32 pair */
+		if (((m->idx == 0x13 || m->idx == 0x14) && ((value & 7) > 5 || (value >> 4 & 7) > 5)) ||
+		    (m->idx == 0x19 && !(value & 0x08)))
+			bad_decode = 1;
+	}
 	else
 		bad_port = 1;
 }
@@ -116,11 +121,12 @@ static int best_code(int side, struct simm simm)
 	return best;
 }
 
-enum { TOP = 1, ALIAS = 2, REGS = 4, FAULT_REGS = 8, CODES = 16, CAR = 32, PORT = 64, HALT = 128, KINDS = 8 };
+enum { TOP = 1, ALIAS = 2, REGS = 4, FAULT_REGS = 8, CODES = 16, CAR = 32, PORT = 64, HALT = 128, DECODE = 256, KINDS = 9 };
 static const char *const kind_names[KINDS] = {
 	"DRAM top not the best the SIMMs give", "a hole or alias below the top", "13h/14h/19h bits or other registers",
 	"registers change with a faulty bit", "POST codes (33h partial, 34h cut, 3Eh no DRAM)",
-	"cache-as-RAM line touched", "I/O port other than 22h/24h/61h", "halted (or not) wrongly"
+	"cache-as-RAM line touched", "I/O port other than 22h/24h/61h", "halted (or not) wrongly",
+	"a decode the IBM BIOS never writes (code 6/7, 19h bit 3 = 0)"
 };
 
 struct result {
@@ -137,7 +143,7 @@ static void run(struct simm p0, struct simm p1, uint32_t seed, int float_last, u
 	m->float_last = float_last;
 	m->stuck_addr = stuck;
 	m->stuck_mask = mask;
-	code_count = bad_port = car_touched = 0;
+	code_count = bad_port = car_touched = bad_decode = 0;
 	r->halted = setjmp(halted);
 	if (!r->halted)
 		viperm_dram_init();
@@ -189,7 +195,7 @@ static int check(struct simm p0, struct simm p1, const struct result *r, const s
 		const struct simm s = pair[bank >> 1];
 		int n = best_code(bank & 1, s);
 		best += n ? 1u << (20 + n) : 0;
-		partial |= n && s.rows + s.cols + 3 > 20 + n;
+		partial |= n && MIN(s.rows, 11) + MIN(s.cols, 11) + 3 > 20 + n;	/* the probe sees MA0-10 only */
 	}
 	uint32_t top = best;
 	if (faulty) {
@@ -215,6 +221,8 @@ static int check(struct simm p0, struct simm p1, const struct result *r, const s
 		fails |= CAR;
 	if (bad_port)
 		fails |= PORT;
+	if (bad_decode)
+		fails |= DECODE;
 	return fails;
 }
 

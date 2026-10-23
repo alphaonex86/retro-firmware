@@ -22,7 +22,8 @@ reports stray flash writes on bus-master cycles.
 
 The board's serial port 1 (3F8h), 115200 8N1, no flow control. Null-modem cable: TX (DB9 pin 3) to RX (2) both ways,
 GND (5) to GND. On the PC: `tools/post_time.py /dev/ttyUSB0 | tee a90-<step>.log` (times each line), started before
-power-on. The POST card in the riser shows port 80h; COM1 also gets each code from romstage on as a line `XX`.
+power-on. COM1 also gets each code from romstage on as a line `XX`. Bring-up runs without the riser (it covers the
+BIOS socket): no POST card, no PCI/ISA cards, so checks 7 and 9-11 wait until the operator fits it with every card.
 
 ## Checklist, in order
 

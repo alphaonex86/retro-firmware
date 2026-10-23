@@ -77,8 +77,9 @@ FDC37C93x in `smscsuperio`):
   and COM1.
 - romstage: the IBM BIOS's 82C557M/82C558M register values without L2, DRAM timing and ATCLK by the JP2 bus clock
   (FDC37C93x GP21-GP20: 66/60 MHz 01h = DDh, 50 MHz or unknown FEh), refresh (PIT 1), DRAM sizing (`raminit.c`: each
-  SIMM side probed for its row and column lines at bank code 7, then the largest code it fills, at most 5 as MA11 is
-  RAS4#: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
+  SIMM side probed for its row and column lines at bank code 5 with MA11 as RAS4#, as the IBM BIOS (code 7 with MA11
+  sized the real board's 1Mx32 pair as 2 + 2 MB; `dramfuzz` refuses code 6/7 and 19h bit 3 = 0), then the largest
+  code it fills: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
   memory count (a dword per 64 KiB; the DRAM ends at the MiB below a failing block), then the CHIPSET FEATURES values
   (`newbios.c`, `NB_VIPERM_FIELDS`) unless Auto, an invalid CMOS or 2 unfinished POSTs.
 - postcar: L1 write-back; C0000-FFFFF shadow RAM read/write, C0000/F0000 cacheable, no flash below 1 MiB.
@@ -97,7 +98,7 @@ REGISTERS, the SIMM pairs on the CPU page; no L2 pages, no ESCD.
 | SIMMs (simm_configs.txt) | IBM BIOS | ours |
 |---|---|---|
 | 2 x 16 MB double-sided 2Mx32 sides (`8 0`) | one 32 MB bank (05h), aliases, hangs at POST A7h | two 16 MB banks (CCh), 32 MB |
-| 2 x 32 MB single-sided 8Mx32 (`10 0`) | 32 MB of 64 (MA11 is RAS4#) | the same, and POST 33h |
+| 2 x 32 MB single-sided 8Mx32 (`10 0`) | 32 MB of 64 (MA11 is RAS4#) | the same (the probe does not see MA11) |
 | a faulty bit at 7F0000h (`4 0`) | its memory count: 7168 KB | the same, and POST 34h |
 
 POST codes (port 80h; the C ones after the bootblock has enabled COM1, i.e. 30h, also on COM1 at 115200 8N1):
