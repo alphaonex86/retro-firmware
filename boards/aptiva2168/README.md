@@ -52,9 +52,10 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   ISA ROM at D8000 stays on the bus or is shadowed, C0000/E/F read-only after POST), `superio.sh` (IBM's COM/LPT
   defaults, LPT 3BCh found, MIDE PIO timings, INTEGRATED PERIPHERALS), `chipset.sh` (CHIPSET FEATURES reach the
   82C557M, Auto = the IBM BIOS's timing, fallback after unfinished POSTs, PCI IRQ, CHIPSET REGISTERS), `setup.sh`,
-  `usbreset.sh` (a CPU-only reset with the VT6212 bus mastering), `usbhs.sh` (8 MB: PCI memory from 1 GiB, the USB disk at high speed), `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the
-  PIRQ routing), `genericbuild.sh` (MB-8433 and Aptiva code apart). The MB-8433 tests that hold for this board run on
-  it through a wrapper (`vm_machine=aptiva2168`): `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no
+  `usbreset.sh` (a CPU-only reset with the VT6212 bus mastering), `usbhs.sh` (8 MB: PCI memory from 1 GiB, the USB
+  disk at high speed), `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the PIRQ routing), `genericbuild.sh` (MB-8433
+  and Aptiva code apart). The MB-8433 tests that hold for this board run on it through a wrapper
+  (`vm_machine=aptiva2168`): `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no
   PS/2 keyboard: the operator's case), `usbkbd`, `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`,
   `kbdpower`, `cmoslayout`. Not `flashtime`: no flash writes on this board (PORT_PLAN D5).
 - `bringup.sh` (step 6): the bring-up ROM's COM1 log in order (bootblock, CAR self-test, romstage, DRAM bank codes and
