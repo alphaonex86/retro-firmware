@@ -10,13 +10,14 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
 
 | Part | Real board | 86Box fork (`86box` submodule) |
 |---|---|---|
-| Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box) |
+| Chipset | OPTi Viper-M 82C556M/557M/558M, MIDE IDE | `opti55x` (upstream 86Box; the MIDE index registers stored and read back) |
 | DRAM | 4 x 72-pin SIMM in two pairs, J23/J24 (RAS0#/RAS1#, inferred) and J27/J28 (RAS2#/RAS3#) | flat RAM; with a pair set in `[OPTi 82C55x (Viper)]` `pair0`/`pair1`, the 82C557M decode (13h/14h/19h, MA map, aliases, absent banks, `stuck_addr`/`stuck_bit`) |
 | CPU | Pentium P54C 166 (66 MHz x 2.5), Socket 7; P54C 75-166 on 50/60/66 MHz | `pentium_p54c`; P5 DIV/IDIV r32 41/46 clocks; with a SIMM pair set, its L1 data cache as RAM (CR0.CD/NW, `src/cpu/cache_l1.c`: 8 KB 2-way 32-byte lines, LRU, KEN# and WB/WT# from the 82C557M) |
 | Bus-speed jumper JP2 | on the FDC37C933 GPIO GP21/GP20, read at EAh (index 2) / EBh: 00 66, 10 60, 11 50 MHz | Super I/O GPIO input, follows the configured bus |
 | Video | Trident TGUI9680XGi on board, PCI 00:02.0, 1 MB, VGA BIOS inside the system BIOS | `tgui9680_onboard_pci`, PCI class VGA (030000, the class in its BIOS's PCI data) |
 | PCI slots | riser, devices 07h/0Bh/0Ch; INTA: 0Bh -> PIRQ0, 07h/0Ch -> PIRQ1 (as the IBM BIOS routes) | same |
 | Super I/O | SMC FDC37C933 at 370h | FDC37C93x (ID 02h), 256-byte RTC |
+| Power controller | microcontroller at ECh/EDh on the GP14 chip select (JP15; inferred, unverified) | `m_aptiva2168_power.c`: IBM's protocol, powers off; `BOX86_POWER_CTL=0`: none |
 | Flash | MX28F1000 128 KiB, IBM BIOS BG2US0J 03/06/96 | AMD 28F010 model; `BOX86_FLASH=tn28f010`: Intel TN28F010 |
 | Sound/modem | Mwave "Dolphin" ISA card | Sound Blaster Pro 2 (Mwave not emulated) |
 
@@ -53,7 +54,10 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   defaults, LPT 3BCh found, MIDE PIO timings, INTEGRATED PERIPHERALS), `chipset.sh` (CHIPSET FEATURES reach the
   82C557M, Auto = the IBM BIOS's timing, fallback after unfinished POSTs, PCI IRQ, CHIPSET REGISTERS), `setup.sh`,
   `usbreset.sh` (a CPU-only reset with the VT6212 bus mastering), `usbhs.sh` (8 MB: PCI memory from 1 GiB, the USB
-  disk at high speed), `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the PIRQ routing), `genericbuild.sh` (MB-8433
+  disk at high speed), `mide.sh` (the MIDE registers equal the IBM BIOS's on the same drives, 66/60 MHz; its 50 MHz
+  table), `softoff.sh` (APM off through the power controller model, as the IBM BIOS's own soft off; without it the
+  IBM fallback reboots), `resume.sh` (CPU-only resets with CMOS 0Fh 0Ah/05h/06h return to the program), `jp2.sh`
+  (a misread JP2 keeps the 66 MHz DRAM timing), `refresh.sh` (no refresh: POST 3Fh, halt), `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the PIRQ routing), `genericbuild.sh` (MB-8433
   and Aptiva code apart). The MB-8433 tests that hold for this board run on it through a wrapper
   (`vm_machine=aptiva2168`): `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no
   PS/2 keyboard: the operator's case), `usbkbd`, `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`,
@@ -72,16 +76,19 @@ Trident VGA BIOS X5.3B as `boards/aptiva2168/vgabios.bin` (a link to the Aptiva 
 CBFS `pci1023,9660.rom.lzma` (SeaBIOS decompresses a file by that suffix). The build fails when something does not fit
 and prints the free bytes (12,292 at step 4, 9,732 at step 5).
 It also builds `out/aptiva2168-bringup.rom` for the first runs on the board (step 6, `BRINGUP.md`): coreboot's console
-(INFO) and SeaBIOS's level 3 log on COM1, without the setup's diagnostic tools (292 bytes free).
+(INFO) and SeaBIOS's level 3 log on COM1, without the setup's diagnostic tools and the OHCI driver (100 bytes free).
 
 coreboot (`coreboot-486`: mainboard `ibm/aptiva2168`, northbridge `opti/viperm`, southbridge `opti/82c558m`, the
 FDC37C93x in `smscsuperio`):
-- bootblock: the whole flash at E0000 (romstage runs there) and at 4 GiB (ROMCS# 4Ah/4Bh), E/F shadow off (a CPU-only
+- bootblock: 82C558M 46h |= 40h first (XDIR only for ROM/NVRAM, as IBM); a CPU-only reset (INIT: L1 written back) with
+  E/F shadow on and CMOS 0Fh 05h, 06h or 0Ah-0Ch goes to SeaBIOS's resume (IBM's codes, 0Bh/0Ch as standard), any
+  other one boots; the whole flash at E0000 (romstage runs there) and at 4 GiB (ROMCS# 4Ah/4Bh), E/F shadow off (a CPU-only
   reset keeps it), PCI bus mastering off on bus 0 before cache-as-RAM (a CPU-only reset, such as a Linux panic, leaves
   the VT6212 walking its schedules), cache-as-RAM, the FDC37C93x CR24 = C4h (IBM: IRQ8 active low, 16-bit decode),
   its keyboard controller, its RTC (off at reset; romstage reads the CMOS) and COM1.
-- romstage: the IBM BIOS's 82C557M/82C558M register values without L2, DRAM timing and ATCLK by the JP2 bus clock
-  (FDC37C93x GP21-GP20: 66/60 MHz 01h = DDh, 50 MHz or unknown FEh), refresh (PIT 1), DRAM sizing (`raminit.c`: each
+- romstage: the IBM BIOS's 82C557M/82C558M register values without L2, refresh (PIT 1; it must toggle 61h bit 4,
+  else POST 3Fh and halt), DRAM timing and ATCLK by the JP2 bus clock (FDC37C93x GP21-GP20 read after LD8 is set up,
+  8 equal reads: 50 MHz 01h = FEh and LCLK/3, else DDh and LCLK/4), DRAM sizing (`raminit.c`: each
   SIMM side probed for its row and column lines at bank code 5 with MA11 as RAS4#, as the IBM BIOS (code 7 with MA11
   sized the real board's 1Mx32 pair as 2 + 2 MB; `dramfuzz` refuses code 6/7 and 19h bit 3 = 0), then the largest
   code it fills: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
@@ -97,8 +104,9 @@ SeaBIOS (`NEWBIOS_BOARD_APTIVA2168`, chipset `NEWBIOS_CHIPSET_OPTI_VIPERM`, the 
 aptiva2168; Pentium names and the core clock by the TSC (the rating within 2%), the bus by JP2; shadow RAM per segment
 (82C557M 04h-06h): C8000-DFFFF blocks on the ISA bus unless an option ROM or "Shadow" in setup uses them, every
 segment read from DRAM read-only after POST; the FDC37C93x ports and the MIDE channels from INTEGRATED PERIPHERALS
-(defaults: IBM's), LPT 3BCh probed first; MIDE PIO timings from the drives' modes (40h the slowest up to mode 3, 43h
-PIO 4 per drive); CHIPSET FEATURES (DRAM timing, posted write, pipelining, slow refresh, BIOS caching, L1 write-back,
+(defaults: IBM's), LPT 3BCh probed first; the MIDE as the IBM BIOS (40h 24h/27h, its index registers by drive mode and JP2 bus, 43h
+PIO 4 per drive); APM off through the board's power controller at ECh/EDh when it answers (IBM's protocol), else
+IBM's fallback (CMOS 0Fh = 0, 8042 reset); CHIPSET FEATURES (DRAM timing, posted write, pipelining, slow refresh, BIOS caching, L1 write-back,
 PCI pre-snoop, HITM# one CLK later), CHIPSET
 REGISTERS, the SIMM pairs on the CPU page; no L2 pages, no ESCD.
 
@@ -113,6 +121,7 @@ POST codes (port 80h; the C ones after the bootblock has enabled COM1, i.e. 30h,
 | Code | Step that starts |
 |---|---|
 | `01` `03` `04` `10` | reset vector, IDT/GDT, protected mode, 32-bit code |
+| `01` `02` | CPU-only reset with a CMOS 0Fh resume code: SeaBIOS resumes, no POST |
 | `21` `22` `23` | cache-as-RAM: bank 0 = 2 MB, A20, L1 on, reading 1A0000h-1A1FFFh into it, CD = NW = 1 |
 | `26` | DRAM decode off (82C557M 13h = 88h): the range now exists only in L1 |
 | `29` / `2A` | CAR self-test (each dword its address, then the complement) passed / **failed: halted** |
@@ -125,6 +134,7 @@ POST codes (port 80h; the C ones after the bootblock has enabled COM1, i.e. 30h,
 | `33` | warning: a SIMM holds more than the 82C557M addresses, the rest is unused |
 | `34` | warning: a 64 KiB block failed the memory count, the DRAM ends at the MiB below it |
 | `3E` | **no usable DRAM (2 MiB at least): halted** |
+| `3F` | **no DRAM refresh (port 61h bit 4 never toggles): halted** |
 | `3C` `3D` | postcar, cache-as-RAM left |
 | `38` | shadow RAM C0000-FFFFF; then ramstage (coreboot's codes) and SeaBIOS (`B0`-`BD`) |
 

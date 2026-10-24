@@ -173,7 +173,8 @@ vm_kill() {  # 86Box ignores SIGTERM
 post_once() {  # double POST probe on the POST card log: between two CPU resets no POST step starts twice, no soft
                # reset (8042, port 92h, triple fault) cuts a POST short of its prompt (only the test resets hard), and
                # a USB controller still bus mastering at a soft reset (a Linux panic) is stopped before the
-               # cache-as-RAM fill (POST 22h; it would write into the cache-as-RAM).
+               # cache-as-RAM fill (POST 22h; it would write into the cache-as-RAM). 01 02: a CPU-only reset resumed
+               # by SeaBIOS (CMOS 0Fh), no POST.
                # vm_post_crash_ok=1: a test whose emulated hardware is faulty on purpose may crash a POST
   [ -f "$vm/post.log" ] || return 0
   awk '/^USB-DMA/ { usb = $2 == "on"; if (!usb) dma_reset = 0; next }
@@ -181,6 +182,7 @@ post_once() {  # double POST probe on the POST card log: between two CPU resets 
                   if (usb && $2 == "soft") dma_reset = 1
                   split("", seen); busy = 0; next }
        dma_reset && $1 == "22" { print "USB bus mastering still on at the cache-as-RAM fill after a soft reset"; bad = 1 }
+       $1 == "02" && last == "01" { busy = 0; last = $1; next }
        { last = $1 }
        $1 == "01" || $1 == "B0" { busy = 1 }
        $1 ~ /^(B[0-8]|BB)$/ && seen[$1]++ { print "POST step " $1 " started twice"; bad = 1 }

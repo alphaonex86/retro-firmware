@@ -1,7 +1,7 @@
 #!/bin/bash
 # FDC37C93x and MIDE: CR24 C4h (IRQ8 active low, 16-bit decode) and the IBM BIOS's ports by default (COM1 3F8h, COM2
-# 2F8h, LPT 3BCh: SeaBIOS finds it), the MIDE PIO timing of the drives (40h[1:0] the slowest drive's mode up to 3, 43h
-# PIO 4 per drive); INTEGRATED PERIPHERALS and PNP/PCI CONFIGURATION changed and saved: LPT 378h, COM2 off, secondary
+# 2F8h, LPT 3BCh: SeaBIOS finds it), the MIDE PIO timing of the drives as the IBM BIOS (40h 24h, 27h with a PIO 4
+# drive; 43h PIO 4 per drive; the timing registers: mide.sh); INTEGRATED PERIPHERALS and PNP/PCI CONFIGURATION changed and saved: LPT 378h, COM2 off, secondary
 # IDE channel off, primary master PIO mode 1.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
@@ -64,5 +64,5 @@ vm_expect "Serial Port\(s\)   : 3F8 "
 vm_expect "Parallel Port\(s\) : 378"
 vm_expect "Pri. Master Disk : 9MB, PIO 1"
 vm_expect "Sec. Master Disk : None"
-mide 9 00                                         # secondary off, PIO 1
+mide 8 00                                         # secondary off; PIO 1 by the timing registers
 vm_stop

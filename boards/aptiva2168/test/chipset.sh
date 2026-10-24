@@ -74,7 +74,10 @@ vm_end_of_post 60
 vm_expect "Pri. Master Disk : 31MB, PIO 2"
 check_chipset 1
 expect_bits "$(vm_pci_byte 00:01.0 40)" 0x07 0x04 "PIRQ0 -> IRQ 11 (82C558M 40h bits 2-0)"
-expect_bits "$(vm_pci_byte 00:14.0 40)" 0x03 0x02 "MIDE PIO 2 (40h)"
+rm -f "$vm/mide.txt"                              # MIDE PIO 2: timing register A, 31h at 66 MHz
+vm_cmd io "$vm/mide.txt" R1f1 R1f1 w1f2=03 r1f3 w1f6=10 r1f0 w1f6=11 w1f2=80
+for _ in $(seq 50); do [ -s "$vm/mide.txt" ] && break; sleep 0.1; done
+[ "$(tail -n 2 "$vm/mide.txt" | awk '{print $2}' | paste -sd ' ')" = "95 31" ] || fail "MIDE PIO 2: $(cat "$vm/mide.txt")"
 chip_page "3 CLKs" Enabled
 vm_tool 7 0                                       # CPU page: timing and SIMMs
 vm_wait_text "DRAM timing +: at 67 MHz \(bus\), RAS# precharge 3, CAS# read 3, write 2 CLKs" 5
