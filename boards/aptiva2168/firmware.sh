@@ -43,6 +43,7 @@ rom aptiva2168 aptiva "CONFIG_PAYLOAD_BCJ_X86=y
 # SeaBIOS's level 3 log (PCI, USB, drives, option ROMs) and coreboot's console at INFO: stages, CAR, DRAM sizing (6, as
 # 7 does not fit with level 3). postcar's console (4.5 KB) does not fit either: its POST codes 3C 3D 38 show it on COM1.
 seabios aptiva-bringup "# CONFIG_USB_OHCI is not set
+# CONFIG_NEWBIOS_NBMON is not set
 # CONFIG_NEWBIOS_TOOL_INFO_CPU is not set
 # CONFIG_NEWBIOS_TOOL_INFO_PCI is not set
 # CONFIG_NEWBIOS_TOOL_INFO_USB is not set

@@ -138,6 +138,30 @@ POST codes (port 80h; the C ones after the bootblock has enabled COM1, i.e. 30h,
 | `3C` `3D` | postcar, cache-as-RAM left |
 | `38` | shadow RAM C0000-FFFFF; then ramstage (coreboot's codes) and SeaBIOS (`B0`-`BD`) |
 
+## COM1 monitor (NBMON)
+
+`out/aptiva2168.rom` (not the bring-up ROM) has a monitor on COM1 (115200 8N1, polled; `seabios-486/src/nbmon.c`,
+`CONFIG_NEWBIOS_NBMON`): to drive the board without keyboard, USB or Linux. SeaBIOS prints `NBMON start` when its
+POST starts and, before the POST error halt, `NBMON ready <lo>-<hi>` (hex: RAM a payload may use during POST; 8 MB:
+`00100000-0077fad0` in 86Box); a line `nbmon` within 2 s enters the monitor, else the POST goes on. Each "No bootable
+device" retry offers the same window. Lines in: CR or LF, hex, no echo; each command answers data lines, then `OK` or
+`ERR <reason>`:
+
+| Command | Answer |
+|---|---|
+| `rb`/`rw`/`rl ADDR [COUNT]` | `aaaaaaaa: vv vv ...`, 16 bytes a line |
+| `wb`/`ww`/`wl ADDR VAL...` | consecutive writes |
+| `ib`/`iw`/`il PORT`, `ob`/`ow`/`ol PORT VAL` | the value read |
+| `ld ADDR HEXBYTES` (at most 128 bytes), `crc ADDR LEN` | the zlib CRC32 |
+| `call ADDR [ARG]` | the payload's own lines, then its return value: `u32 f(u32 arg, const struct nbmon_api *api)`, 32-bit flat, cdecl, interrupts off (`tools/nbmon/nbmon_api.h`: putc, getc with a timeout, mdelay, ms ticks) |
+| `boot` | back to the POST |
+| `reset` | CMOS 0Fh = 0 and SeaBIOS's reset (as Ctrl+Alt+Del): a full boot |
+
+Host side: `tools/nbmon.py --tty /dev/ttyUSBn ...` (or `--rx <vm>/serial.log --tx <vm>/com1.in` in 86Box; traffic
+logged to `--log`): `wait`, `cmd "<line>"`, `load FILE ADDR` (crc checked), `call ADDR [ARG]`, `boot`, `reset`,
+`loop SCRIPT [COUNT]` (takes each new `NBMON ready`, also after a crash or reset). Payloads: `tools/nbmon/payload.sh
+x.c ADDR` -> `x.bin` (example `tools/nbmon/hello.c`). Test: `boards/aptiva2168/test/nbmon.sh`.
+
 ## Flashing from Linux
 
 As root under Linux on the A90: `bios-update IMAGE aptiva2168` (`tools/bios-update.sh`; IMAGE: 128 KiB, anything else
