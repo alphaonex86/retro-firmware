@@ -264,6 +264,21 @@ vm_end_of_post() {  # [timeout] -> the setup prompt; F1 past the POST error halt
   vm_wait_text "Press DEL to enter SETUP, ESC for boot" 10
 }
 
+vm_drive_a() {  # the Aptiva (no drive A by default: the operator's is dead), at the setup prompt: Drive A 1.44M
+                # saved, then the next prompt; nothing on other boards
+  [ "${vm_machine:-}" = aptiva2168 ] || return 0
+  vm_setup
+  vm_menu 0
+  vm_wait_text "Date \(mm:dd:yy\)" 5
+  vm_key $K_RIGHT $K_RIGHT
+  for _ in $(seq 12); do vm_key $K_DOWN; done
+  vm_key $K_PGDN $K_PGDN $K_PGDN $K_PGDN
+  vm_expect "Drive A : 1.44M, 3.5 in."
+  vm_key $K_ESC
+  vm_save
+  vm_end_of_post 60
+}
+
 vm_menu() {  # main menu entry index (0-13, column by column) -> opens it; the menu keeps its cursor
   local i
   for ((i = 0; i < ($1 - menu_sel + 14) % 14; i++)); do vm_key $K_DOWN; done

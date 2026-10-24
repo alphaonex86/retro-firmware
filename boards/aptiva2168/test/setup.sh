@@ -36,8 +36,8 @@ vm_expect "Secondary Master : Auto +9M +20 +16 +63"
 year=$(sed -nE 's/.*Date \(mm:dd:yy\) : [0-9]+:[0-9]+:([0-9]{4}).*/\1/p' "$vm/screen.txt")
 vm_key $K_RIGHT $K_RIGHT $K_PGDN                  # year + 1
 for _ in $(seq 12); do vm_key $K_DOWN; done       # Drive A
-vm_expect "Drive A : 1.44M, 3.5 in."
-vm_key $K_PGDN                                    # 1.44M -> 2.88M
+vm_expect "Drive A : None"                        # the Aptiva's default: the operator's drive is dead
+vm_key $K_PGDN $K_PGDN $K_PGDN $K_PGDN $K_PGDN    # None -> 2.88M
 vm_expect "Date \(mm:dd:yy\) : [0-9]+:[0-9]+:$((year + 1))"
 vm_expect "Drive A : 2.88M, 3.5 in."
 vm_key $K_ESC

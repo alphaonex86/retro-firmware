@@ -16,6 +16,7 @@ boot_menu() {  # EEPROM dump -> the F8 boot menu on screen
   BOX86_RTL8139_EEPROM=$1 vm_start nicrom "$rom" "$(disk_cfg "$vm_dir/hdd.img")
 $(nic_cfg "$etherboot")"
   vm_end_of_post 60
+  vm_drive_a
   vm_setup
   vm_key 42                                         # F8
   vm_wait_text "Floppy \[drive A\]" 10
@@ -34,6 +35,7 @@ cp "$nb/build/bzImage" "$vm_dir/tftp/bzImage"
   -o "$vm_dir/tftp/rtl8139-bootrom" "$nb/tools/rtl8139-bootrom.c" || fail "rtl8139-bootrom does not build"
 BOX86_RTL8139_EEPROM=$vm_dir/eeprom-64k.txt vm_start nicrom "$rom" "$(nic_cfg "$etherboot")"
 vm_end_of_post 60
+vm_drive_a
 vm_setup
 vm_menu 1                                                  # BIOS FEATURES SETUP
 vm_wait_text "1st Boot Device" 5
