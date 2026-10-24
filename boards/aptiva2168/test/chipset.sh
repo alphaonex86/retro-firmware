@@ -1,8 +1,8 @@
 #!/bin/bash
 # CHIPSET FEATURES on the Viper-M: Auto Configuration gives the IBM BIOS's DRAM timing for the bus clock (01h DDh at
-# 66 MHz); manual values (NB_VIPERM_FIELDS) and BIOS caching reach the 82C557M, a PCI IRQ set in PNP/PCI reaches the
-# 82C558M, a PIO mode the MIDE; the CHIPSET REGISTERS and CPU pages show them; two unfinished POSTs make coreboot
-# fall back to Auto, a completed one re-arms the manual values.
+# 66 MHz); manual values (NB_VIPERM_FIELDS: also L1 write-through, pre-snoop off, late HITM#) and BIOS caching reach the
+# 82C557M, a PCI IRQ set in PNP/PCI reaches the 82C558M, a PIO mode the MIDE; the CHIPSET REGISTERS and CPU pages show
+# them; two unfinished POSTs make coreboot fall back to Auto, a completed one re-arms the manual values.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -28,10 +28,16 @@ vm_key $K_DOWN $K_PGDN $K_PGDN                    # RAS# precharge 5 -> 3 CLKs
 vm_key $K_DOWN $K_PGUP                            # read CAS# pulse 2 -> 3 CLKs
 vm_key $K_DOWN $K_DOWN $K_DOWN $K_PGDN            # slow refresh on
 vm_key $K_DOWN $K_DOWN $K_DOWN $K_PGUP            # system BIOS not cacheable
+vm_key $K_DOWN $K_DOWN $K_PGUP                    # L1 write-through
+vm_key $K_DOWN $K_PGUP                            # PCI pre-snoop off
+vm_key $K_DOWN $K_PGDN                            # HITM# sampled one CLK later
 vm_expect "DRAM RAS# Precharge +: 3 CLKs"
 vm_expect "DRAM Read CAS# Pulse +: 3 CLKs"
 vm_expect "Slow Refresh \(1/4 Freq\) +: Enabled"
 vm_expect "System BIOS Cacheable +: Disabled"
+vm_expect "L1 Cache Write-Back +: Disabled"
+vm_expect "PCI Pre-Snoop +: Disabled"
+vm_expect "HITM# Sampled 1 CLK Late: Enabled"
 vm_key $K_ESC
 vm_menu 4                                         # PNP/PCI
 for _ in $(seq 4); do vm_key $K_PGDN; done        # INTA# Auto -> 5 -> 9 -> 10 -> 11
@@ -53,9 +59,13 @@ check_chipset() {  # manual values applied (1) or Auto (0)
   if [ "$1" = 1 ]; then
     expect_bits "$(idx 01)" 0x0f 0x07 "RAS# precharge 3 CLKs, CAS# read 3, write 2 CLKs (01h)"
     expect_bits "$(idx 12)" 0x0c 0x08 "slow refresh (12h)"
+    expect_bits "$(idx 08)" 0x22 0x00 "L1 write-through, HITM# one CLK later (08h)"
+    expect_bits "$(idx 0f)" 0x80 0x00 "PCI pre-snoop off (0Fh)"
   else
     expect_bits "$(idx 01)" 0xff 0xdd "Auto DRAM timing (01h)"
     expect_bits "$(idx 12)" 0x0c 0x00 "refresh on each REFRESH# (12h)"
+    expect_bits "$(idx 08)" 0x22 0x22 "L1 write-back, HITM# without delay (08h)"
+    expect_bits "$(idx 0f)" 0x80 0x80 "PCI pre-snoop (0Fh)"
   fi
   expect_bits "$(idx 06)" 0x30 0x20 "video BIOS cacheable, system BIOS not (06h)"
 }

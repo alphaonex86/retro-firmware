@@ -253,9 +253,13 @@ static int run_case(const struct cmos_case *c)
 	for (unsigned i = 0; manual && i < ARRAY_SIZE(fields); i++) {
 		const struct nb_field *f = &fields[i];
 		u8 v = NB_CMOS_GET(cmos_read, f->setting);
-		if (v < f->count && (mc->idx[f->reg] & f->mask) != f->value[v])
+		if (f->setting != NB_EARLY_CACHE_WRITE && v < f->count && (mc->idx[f->reg] & f->mask) != f->value[v])
 			fails |= MANUAL_AUTO;
 	}
+	/* the L1 policy: ramstage's (viperm_l1_write_back), romstage leaves 08h bit 1 */
+	if ((mc->idx[0x08] ^ idx0[0x08]) & 0x02
+	    || viperm_l1_write_back() != (!manual || NB_CMOS_GET(cmos_read, NB_EARLY_CACHE_WRITE)))
+		fails |= MANUAL_AUTO;
 	unsigned long addr = ALIGN_UP((unsigned long)table, 16);
 	write_pirq_routing_table(addr);
 	return fails | field_failures(idx0) | pirq_failures((const struct irq_routing_table *)addr, isa0);

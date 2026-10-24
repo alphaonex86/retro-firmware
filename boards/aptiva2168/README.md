@@ -48,15 +48,15 @@ port plan are in the Aptiva project (`/mnt/data/perso/retro/Aptiva A90/docs`, `d
   test; only 14h, interrupts off) on the DRAM model: the operator's SIMMs, then a faulty bit.
 - `boards/aptiva2168/test/post.sh`: our ROM to SeaBIOS's text screen (Trident VGA BIOS from CBFS, POST memory test,
   summary, boot attempts), then the same POST codes after Ctrl+Alt+Del.
-- Step 5, SeaBIOS's board code: `cpu.sh` (each P54C setting: name, TSC clock, JP2 bus and multiplier), `shadow.sh`
-  (an ISA ROM at D8000 stays on the bus or is shadowed, C0000/E/F read-only after POST), `superio.sh` (IBM's COM/LPT
+- Step 5, SeaBIOS's board code: `cpu.sh` (each P54C setting: name, TSC clock, JP2 bus and multiplier), `shadow.sh` (an
+  ISA ROM at D8000 stays on the bus or is shadowed, C0000/E/F read-only after POST), `superio.sh` (IBM's COM/LPT
   defaults, LPT 3BCh found, MIDE PIO timings, INTEGRATED PERIPHERALS), `chipset.sh` (CHIPSET FEATURES reach the
   82C557M, Auto = the IBM BIOS's timing, fallback after unfinished POSTs, PCI IRQ, CHIPSET REGISTERS), `setup.sh`,
-  `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the PIRQ routing), `genericbuild.sh` (MB-8433 and Aptiva code
-  apart). The MB-8433 tests that hold for this board run on it through a wrapper (`vm_machine=aptiva2168`):
-  `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no PS/2 keyboard: the operator's case), `usbkbd`,
-  `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`, `kbdpower`, `cmoslayout`. Not `flashtime`: no flash
-  writes on this board (PORT_PLAN D5).
+  `usbreset.sh` (a CPU-only reset with the VT6212 bus mastering), `dos.sh`, `cmosfuzz.sh` (native: `newbios.c` and the
+  PIRQ routing), `genericbuild.sh` (MB-8433 and Aptiva code apart). The MB-8433 tests that hold for this board run on
+  it through a wrapper (`vm_machine=aptiva2168`): `errors`, `deadcmos`, `floppy`, `bigdisk`, `hddtype`, `nokbd` (no
+  PS/2 keyboard: the operator's case), `usbkbd`, `usbboot`, `usbfault`, `usblilo`, `pxe`, `nicrom`, `warmboot`,
+  `kbdpower`, `cmoslayout`. Not `flashtime`: no flash writes on this board (PORT_PLAN D5).
 - `bringup.sh` (step 6): the bring-up ROM's COM1 log in order (bootblock, CAR self-test, romstage, DRAM bank codes and
   size, postcar, ramstage, SeaBIOS's log, its screen) on 2 SIMM configurations, the operator's 24 MB with a USB
   keyboard and the RTL8139 socket ROM.
@@ -76,8 +76,9 @@ It also builds `out/aptiva2168-bringup.rom` for the first runs on the board (ste
 coreboot (`coreboot-486`: mainboard `ibm/aptiva2168`, northbridge `opti/viperm`, southbridge `opti/82c558m`, the
 FDC37C93x in `smscsuperio`):
 - bootblock: the whole flash at E0000 (romstage runs there) and at 4 GiB (ROMCS# 4Ah/4Bh), E/F shadow off (a CPU-only
-  reset keeps it), cache-as-RAM, the FDC37C93x keyboard controller, its RTC (off at reset; romstage reads the CMOS)
-  and COM1.
+  reset keeps it), PCI bus mastering off on bus 0 before cache-as-RAM (a CPU-only reset, such as a Linux panic, leaves
+  the VT6212 walking its schedules), cache-as-RAM, the FDC37C93x CR24 = C4h (IBM: IRQ8 active low, 16-bit decode),
+  its keyboard controller, its RTC (off at reset; romstage reads the CMOS) and COM1.
 - romstage: the IBM BIOS's 82C557M/82C558M register values without L2, DRAM timing and ATCLK by the JP2 bus clock
   (FDC37C93x GP21-GP20: 66/60 MHz 01h = DDh, 50 MHz or unknown FEh), refresh (PIT 1), DRAM sizing (`raminit.c`: each
   SIMM side probed for its row and column lines at bank code 5 with MA11 as RAS4#, as the IBM BIOS (code 7 with MA11
@@ -85,17 +86,19 @@ FDC37C93x in `smscsuperio`):
   code it fills: the IBM BIOS's codes; 3 votes per probe against a faulty bit; never the cache-as-RAM lines), then the IBM
   memory count (a dword per 64 KiB; the DRAM ends at the MiB below a failing block), then the CHIPSET FEATURES values
   (`newbios.c`, `NB_VIPERM_FIELDS`) unless Auto, an invalid CMOS or 2 unfinished POSTs.
-- postcar: L1 write-back; C0000-FFFFF shadow RAM read/write, C0000/F0000 cacheable, no flash below 1 MiB.
-- ramstage: PCI, PIRQ0-3# to IRQ10/11/10/11 level (IBM: 0Bh INTA PIRQ0#, 07h/0Ch INTA PIRQ1#; INTB-D by the IBM BIOS's
-  swizzle, `$PIR`; a PCI IRQ set in setup kept if the 82C558M routes it), MIDE legacy mode, the FDC37C93x logical
-  devices as the IBM BIOS sets them (LPT 3BCh, LD8 GPIO steering of IRQ14/15).
+- postcar: C0000-FFFFF shadow RAM read/write, C0000/F0000 cacheable, no flash below 1 MiB.
+- ramstage: L1 write-back from its first step (write-through if CHIPSET FEATURES says so), PCI, PIRQ0-3# to
+  IRQ10/11/10/11 level (IBM: 0Bh INTA PIRQ0#, 07h/0Ch INTA PIRQ1#; INTB-D by the IBM BIOS's swizzle, `$PIR`; a PCI IRQ
+  set in setup kept if the 82C558M routes it), MIDE legacy mode, the FDC37C93x logical devices as the IBM BIOS sets
+  them (LPT 3BCh, LD8 GPIO steering of IRQ14/15).
 
 SeaBIOS (`NEWBIOS_BOARD_APTIVA2168`, chipset `NEWBIOS_CHIPSET_OPTI_VIPERM`, the cuts of `seabios.config`): BIOS name
 aptiva2168; Pentium names and the core clock by the TSC (the rating within 2%), the bus by JP2; shadow RAM per segment
 (82C557M 04h-06h): C8000-DFFFF blocks on the ISA bus unless an option ROM or "Shadow" in setup uses them, every
 segment read from DRAM read-only after POST; the FDC37C93x ports and the MIDE channels from INTEGRATED PERIPHERALS
 (defaults: IBM's), LPT 3BCh probed first; MIDE PIO timings from the drives' modes (40h the slowest up to mode 3, 43h
-PIO 4 per drive); CHIPSET FEATURES (DRAM timing, posted write, pipelining, slow refresh, BIOS caching), CHIPSET
+PIO 4 per drive); CHIPSET FEATURES (DRAM timing, posted write, pipelining, slow refresh, BIOS caching, L1 write-back,
+PCI pre-snoop, HITM# one CLK later), CHIPSET
 REGISTERS, the SIMM pairs on the CPU page; no L2 pages, no ESCD.
 
 | SIMMs (simm_configs.txt) | IBM BIOS | ours |

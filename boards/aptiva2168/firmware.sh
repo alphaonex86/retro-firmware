@@ -11,8 +11,11 @@ cb_mainboard=ibm/aptiva2168
 cb_config=$bd/coreboot.config
 sb_configs=("$cb/src/mainboard/$cb_mainboard/config_seabios" "$nb/seabios.config" "$bd/seabios.config")
 
-h=mainboard/$cb_mainboard/post_serial.h   # the POST code line on COM1, one copy in each tree
-cmp -s "$sb/src/${h##*/}" "$cb/src/$h" || { echo "BUILD REFUSED: ${sb##*/}/src/${h##*/} and ${cb##*/}/src/$h differ" >&2; exit 1; }
+# The CMOS layout and the POST code line on COM1: one copy in each tree, kept equal
+for h in include/newbios_cmos.h mainboard/$cb_mainboard/post_serial.h; do
+  cmp -s "$sb/src/${h##*/}" "$cb/src/$h" \
+    || { echo "BUILD REFUSED: ${sb##*/}/src/${h##*/} and ${cb##*/}/src/$h differ" >&2; exit 1; }
+done
 
 vga=$bd/vgabios.bin vga_sha256=0021d720843ad5338b0a2acd45ee93c04bc52e775d5f68e8a7d926b0e1a14e2a
 [ -f "$vga" ] || { echo "BUILD REFUSED: no $vga (the board's Trident VGA BIOS X5.3B)" >&2; exit 1; }

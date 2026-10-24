@@ -1,8 +1,8 @@
 #!/bin/bash
-# FDC37C93x and MIDE: the IBM BIOS's ports by default (COM1 3F8h, COM2 2F8h, LPT 3BCh: SeaBIOS finds it), the
-# MIDE PIO timing of the drives (40h[1:0] the slowest drive's mode up to 3, 43h PIO 4 per drive); INTEGRATED
-# PERIPHERALS and PNP/PCI CONFIGURATION changed and saved: LPT 378h, COM2 off, secondary IDE channel off, primary master
-# PIO mode 1.
+# FDC37C93x and MIDE: CR24 C4h (IRQ8 active low, 16-bit decode) and the IBM BIOS's ports by default (COM1 3F8h, COM2
+# 2F8h, LPT 3BCh: SeaBIOS finds it), the MIDE PIO timing of the drives (40h[1:0] the slowest drive's mode up to 3, 43h
+# PIO 4 per drive); INTEGRATED PERIPHERALS and PNP/PCI CONFIGURATION changed and saved: LPT 378h, COM2 off, secondary
+# IDE channel off, primary master PIO mode 1.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -27,6 +27,13 @@ hdd_02_parameters = 63, 16, 20, 0, ide
 hdd_02_fn = $vm_dir/sec.img
 hdd_02_ide_channel = 1:0"
 vm_end_of_post 60
+vm_cmd out 370 55
+vm_cmd out 370 55
+rm -f "$vm/cr24.txt"
+vm_cmd idx 370 371 24 "$vm/cr24.txt"
+for _ in $(seq 50); do [ -s "$vm/cr24.txt" ] && break; sleep 0.1; done
+vm_cmd out 370 aa
+expect_bits "$(awk '{print $2}' "$vm/cr24.txt")" 0xff 0xc4 "CR24: IRQ8 active low, 16-bit decode"
 vm_expect "Serial Port\(s\)   : 3F8 2F8"
 vm_expect "Parallel Port\(s\) : 3BC"
 vm_expect "Pri. Master Disk : 9MB, PIO 4"
