@@ -1,13 +1,13 @@
 /*
- * dramprobe: what the IBM Aptiva 2168's 82C557M sees in SIMM pair J27/J28 (14h), on the real silicon. Under Linux,
+ * dramprobe: what the IBM Aptiva 2168's 82C557M sees in SIMM pair J27/J28 (19h, RAS4#/RAS5#), on the real silicon. Under Linux,
  * as root, when Linux does not use that pair (the firmware left it out, or mem=), it reports:
  *  - where the pair answers, MB by MB, for each bank code (map);
  *  - the IBM BIOS's MB count (BG2US0J F000:120B) and side B check, and the code byte it would pick;
  *  - our raminit.c probe (coreboot-486 northbridge/opti/viperm), each vote;
  *  - per code 1-5 of each side: the address lines that alias, the data bits that fail per SIMM (low/high dword);
  *  - every dword of the pair at the IBM BIOS's code, with its address and then the complement.
- * Only 14h changes, interrupts off (iopl 3: cli), and it is back before they are on: PCI BARs above the firmware's
- * DRAM top lie in that range. Only what 14h decodes is accessed: the 82C557M forwards to PCI only the memory cycles
+ * Only 19h changes, interrupts off (iopl 3: cli), and it is back before they are on: PCI BARs above the firmware's
+ * DRAM top lie in that range. Only what 19h decodes is accessed: the 82C557M forwards to PCI only the memory cycles
  * its DRAM does not take (data book 3.4, M/IO#), so no device sees them.
  * Build for the 486/P5 (static, uClibc), e.g. with the HDD image's toolchain:
  *   i486-buildroot-linux-uclibc-gcc -O2 -static -o dramprobe tools/dramprobe.c
@@ -55,10 +55,10 @@ static void interrupts(int on)
 }
 #endif
 
-static uint8_t reg14;	/* 14h as the firmware left it */
-static uint32_t decoded;	/* bytes of the pair 14h decodes now */
+static uint8_t reg19;	/* 19h as the firmware left it */
+static uint32_t decoded;	/* bytes of the pair 19h decodes now */
 
-/* Bytes of the two banks of a pair register (13h, 14h): code n = 1 MB << n per bank */
+/* Bytes of the two banks of a pair register (13h, 14h, 19h): code n = 1 MB << n per bank */
 static uint32_t pair_size(uint8_t reg)
 {
 	uint32_t size = 0;
@@ -80,12 +80,12 @@ static uint32_t rd(uint32_t a)
 	return a < decoded ? read_dword(a) : 0xffffffff;
 }
 
-/* 14h, then 128 refresh toggles of port 61h bit 4 (about 2 ms), as the IBM BIOS */
+/* 19h, then 128 refresh toggles of port 61h bit 4 (about 2 ms), as the IBM BIOS */
 static void decode(uint8_t value)
 {
 	uint8_t last = refresh_bit();
 
-	reg_write(0x14, value);
+	reg_write(0x19, value);
 	decoded = pair_size(value);
 	for (int toggles = 0, reads = 0; toggles < 128 && reads < 100000; reads++) {
 		uint8_t now = refresh_bit();
@@ -102,7 +102,7 @@ static void enter(uint8_t value)
 
 static void leave(void)
 {
-	decode(reg14);
+	decode(reg19);
 	interrupts(1);
 }
 
@@ -121,7 +121,7 @@ static void map(uint8_t value)
 		line[mb] = mb * MB >= decoded ? '-' : v == (0x5a000000 | mb) ? 'o' : (v & 0xffffff80) == 0x5a000000 ? 'a' : '.';
 	}
 	leave();
-	printf("map 14h=%02x %s\n", value, line);
+	printf("map 19h=%02x %s\n", value, line);
 }
 
 /* The IBM BIOS's MBs of 0-64 MB whose 8 dword pairs keep their address */
@@ -144,11 +144,11 @@ static uint8_t ibm_code(void)
 {
 	static const uint8_t codes[] = { 0x00, 0x01, 0x11, 0x03, 0x33, 0x05, 0x55 };
 
-	enter(0x80 | 0x55);
+	enter(0x88 | 0x55);
 	unsigned int n = ibm_count(), side_b = 1;
 	uint8_t code = n ? codes[__builtin_ctz(n)] : 0;
 	if (n & 0x54) {
-		decode(0x80 | code);
+		decode(0x88 | code);
 		wr(n * MB / 2, 0xa2d75a5a);
 		wr(n * MB / 2 + 4, 0);
 		side_b = rd(n * MB / 2) == 0xa2d75a5a;
@@ -156,7 +156,7 @@ static uint8_t ibm_code(void)
 	leave();
 	if (!side_b)
 		code = (code & 7) + 1;
-	printf("IBM count at 14h=d5: %u MB, side B check %s: code byte %02x\n", n,
+	printf("IBM count at 19h=dd: %u MB, side B check %s: code byte %02x\n", n,
 	       n & 0x54 ? side_b ? "kept" : "lost" : "not needed", code);
 	return code;
 }
@@ -182,7 +182,7 @@ static void ours(void)
 {
 	char votes[2][64];
 
-	enter(0x80 | 0x55);
+	enter(0x88 | 0x55);
 	for (int side = 0; side < 2; side++) {
 		uint32_t a = side * 32 * MB;
 		int rows = 0, cols = 0, present = distinct(a, 8, votes[0]);
@@ -202,7 +202,7 @@ static void ours(void)
 /* Side (0 A, 1 B) at code: the address bits that alias, and the failing data bits of each dword at 4 places */
 static void lines(int side, int code)
 {
-	uint8_t value = 0x80 | code | (side ? code << 4 : 0);
+	uint8_t value = 0x88 | code | (side ? code << 4 : 0);
 	uint32_t start = side ? MB << code : 0, size = MB << code, aliases = 0, bad[2] = { 0, 0 };
 
 	enter(value);
@@ -224,7 +224,7 @@ static void lines(int side, int code)
 		}
 	}
 	leave();
-	printf("side %c code %d (14h=%02x): aliasing address bits %08x, failing data bits low dword %08x, high %08x\n",
+	printf("side %c code %d (19h=%02x): aliasing address bits %08x, failing data bits low dword %08x, high %08x\n",
 	       'A' + side, code, value, aliases, bad[0], bad[1]);
 }
 
@@ -235,7 +235,7 @@ static void full(uint8_t code)
 
 	if (!size)
 		return;
-	enter(0x80 | code);
+	enter(0x88 | code);
 	uint32_t first[8][2];
 	for (uint32_t flip = 0; flip < 2; flip++) {
 		for (uint32_t a = 0; a < size; a += FULL_STEP)
@@ -248,7 +248,7 @@ static void full(uint8_t code)
 		}
 	}
 	leave();
-	printf("full test 14h=%02x, %u MB from %u MB: %u errors\n", 0x80 | code, size / MB, base / MB, errors);
+	printf("full test 19h=%02x, %u MB from %u MB: %u errors\n", 0x88 | code, size / MB, base / MB, errors);
 	for (uint32_t i = 0; i < errors && i < 8; i++)
 		printf("  %08x: bits %08x wrong\n", first[i][0], first[i][1]);
 }
@@ -295,14 +295,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 #endif
-	uint8_t r13 = reg_read(0x13), r19 = reg_read(0x19);
-	reg14 = reg_read(0x14);
-	base = pair_size(r13);
+	uint8_t r13 = reg_read(0x13), r14 = reg_read(0x14);
+	reg19 = reg_read(0x19);
+	base = pair_size(r13) + pair_size(r14);
 	uint32_t ram_top = linux_ram_top();
-	printf("82C557M 13h %02x 14h %02x 19h %02x: J27/J28 from %u MB; Linux RAM ends at %u KB\n", r13, reg14, r19,
+	printf("82C557M 13h %02x 14h %02x 19h %02x: J27/J28 from %u MB; Linux RAM ends at %u KB\n", r13, r14, reg19,
 	       base / MB, ram_top / 1024);
-	if (ram_top > base || (reg14 & 0x80) != 0x80 || (r13 & 0x80) != 0x80) {
-		fprintf(stderr, "dramprobe: Linux uses J27/J28, or 13h/14h are not in full decode: not touched "
+	if (ram_top > base || (reg19 & 0x88) != 0x88 || (r13 & 0x80) != 0x80) {
+		fprintf(stderr, "dramprobe: Linux uses J27/J28, or 13h/19h are not in full decode: not touched "
 			"(boot with mem=%uM)\n", base / MB);
 		return 1;
 	}
@@ -320,14 +320,14 @@ int main(int argc, char **argv)
 #endif
 	setvbuf(stdout, NULL, _IOLBF, 0);
 	for (int code = 1; code <= 5; code++)
-		map(0x80 | code);
-	map(0x80 | 0x55);
+		map(0x88 | code);
+	map(0x88 | 0x55);
 	uint8_t ibm = ibm_code();
 	ours();
 	for (int side = 0; side < 2; side++)
 		for (int code = 1; code <= 5; code++)
 			lines(side, code);
 	full(ibm);
-	printf("14h back to %02x\n", reg_read(0x14));
+	printf("19h back to %02x\n", reg_read(0x19));
 	return 0;
 }

@@ -5,16 +5,16 @@
 # unusable: the IBM BIOS cannot size it (its own choice); stuck: that RAM bit reads 0; ours: where our firmware
 # differs (it uses what the SIMMs give); partial: our firmware reports SIMMs it can address only in part (POST 33h).
 4 0 8192 8b 80 88
-0 4 8192 88 83 88
-4 4 16384 8b 83 88
+0 4 8192 88 80 8b
+4 4 16384 8b 80 8b
 5 0 16384 bb 80 88
 2 0 4096 99 80 88
-1 2 6144 89 91 88
-3 6 20480 8a 84 88
-4 5 24576 8b b3 88
-5 4 24576 bb 83 88
-7 9 98304 8d d5 88
-9 9 131072 dd d5 88
+1 2 6144 89 80 99
+3 6 20480 8a 80 8c
+4 5 24576 8b 80 bb
+5 4 24576 bb 80 8b
+7 9 98304 8d 80 dd
+9 9 131072 dd 80 dd
 8 0 hang@A7 8d 80 88 unusable ours=32768,cc,80,88
 10 0 32768 8d 80 88 unusable
 4 0 7168 8b 80 88 stuck=7f0000:1

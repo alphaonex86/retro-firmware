@@ -36,6 +36,12 @@ static void bank_codes(const uint8_t regs[3], uint8_t code[6])
 		code[5] = 0;
 }
 
+/* The socket pair of a bank: J23/J24 banks 0/1, J27/J28 banks 4/5 (RAS4#/RAS5#); -1: banks 2/3, no sockets */
+static int bank_pair(int bank)
+{
+	return bank < 2 ? 0 : bank >= 4 ? 1 : -1;
+}
+
 int64_t model_decode(const struct model *m, const uint8_t regs[3], uint32_t addr)
 {
 	uint8_t code[6];
@@ -49,10 +55,11 @@ int64_t model_decode(const struct model *m, const uint8_t regs[3], uint32_t addr
 			break;
 		base += size;
 	}
-	if (bank >= 4 || (bank & 1) >= m->simm[bank >> 1].sides)
+	int pair = bank < 6 ? bank_pair(bank) : -1;
+	if (pair < 0 || (bank & 1) >= m->simm[pair].sides)
 		return -1;
 
-	const struct simm *simm = &m->simm[bank >> 1];
+	const struct simm *simm = &m->simm[pair];
 	int n = code[bank];
 	uint32_t row = (addr >> 12) & 0x1ff, col = (addr >> 3) & 0x1ff;
 	for (int i = 0; i < ((regs[2] & 0x08) ? 2 : 3); i++) {
@@ -63,7 +70,7 @@ int64_t model_decode(const struct model *m, const uint8_t regs[3], uint32_t addr
 	}
 	row &= (1u << simm->rows) - 1;
 	col &= (1u << simm->cols) - 1;
-	int64_t pair_base = (int64_t)(bank >> 1) << 32;
+	int64_t pair_base = (int64_t)pair << 32;
 	return pair_base + ((((((int64_t)(bank & 1) << simm->rows) | row) << simm->cols) | col) << 3) + (addr & 7);
 }
 
@@ -85,8 +92,9 @@ int model_flat(const struct model *m, const uint8_t regs[3])
 	bank_codes(regs, code);
 	for (int bank = 0; bank < 6; bank++) {
 		int n = code[bank];
-		if (n && (bank >= 4 || (bank & 1) >= m->simm[bank >> 1].sides || ((regs[2] & 0x08) && n >= 6) ||
-			  9 + n / 2 > m->simm[bank >> 1].rows || 9 + (n - 1) / 2 > m->simm[bank >> 1].cols))
+		int pair = bank_pair(bank);
+		if (n && (pair < 0 || (bank & 1) >= m->simm[pair].sides || ((regs[2] & 0x08) && n >= 6) ||
+			  9 + n / 2 > m->simm[pair].rows || 9 + (n - 1) / 2 > m->simm[pair].cols))
 			return 0;
 	}
 	return 1;

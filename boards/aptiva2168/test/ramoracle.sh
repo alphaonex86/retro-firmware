@@ -6,8 +6,7 @@
 # configured size, which the bank codes add up to; "unusable" lines are its own choice, hang@<POST code>: its memory
 # test stops there for good (an alias overwrites low memory); stuck=<address>:<bit>: that RAM bit reads 0 (the
 # model's faulty bit; the BIOS sizes in 64 KB steps with 55AA55AAh).
-# The operator's board: 2 x 8 MB double-sided in SIMM1/SIMM2, 2 x 4 MB in SIMM5/SIMM6: "5 4" if SIMM1/SIMM2 is J23/J24,
-# "4 5" if it is J27/J28 (not known yet).
+# The operator's board: 2 x 8 MB double-sided in SIMM1/SIMM2 (J23/J24, 13h), 2 x 4 MB in SIMM5/SIMM6 (J27/J28, 19h): "5 4".
 # usage: ramoracle.sh (all, from simm_configs.txt) | ramoracle.sh <one line of simm_configs.txt>
 bd=$(dirname "$(dirname "$(readlink -f "$0")")")
 . "$bd/../../test/lib.sh"

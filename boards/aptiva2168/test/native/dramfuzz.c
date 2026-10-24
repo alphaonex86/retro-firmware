@@ -69,9 +69,9 @@ void outb(u8 value, u16 port)
 		m->idx = value;
 	else if (port == 0x24) {
 		m->regs[m->idx] = value;
-		/* IBM never decodes code 6/7 or MA11 as MA11; probing so missized the real board's 1Mx32 pair */
-		if (((m->idx == 0x13 || m->idx == 0x14) && ((value & 7) > 5 || (value >> 4 & 7) > 5)) ||
-		    (m->idx == 0x19 && !(value & 0x08)))
+		/* IBM never decodes code 6/7 or MA11 as MA11; 14h's RAS2#/RAS3# have no sockets */
+		if (((m->idx == 0x13 || m->idx == 0x19) && ((value & 7) > 5 || (value >> 4 & 7) > 5)) ||
+		    (m->idx == 0x19 && (value & 0x88) != 0x88) || (m->idx == 0x14 && value != 0x80))
 			bad_decode = 1;
 	}
 	else
@@ -126,7 +126,7 @@ static const char *const kind_names[KINDS] = {
 	"DRAM top not the best the SIMMs give", "a hole or alias below the top", "13h/14h/19h bits or other registers",
 	"registers change with a faulty bit", "POST codes (33h partial, 34h cut, 3Eh no DRAM)",
 	"cache-as-RAM line touched", "I/O port other than 22h/24h/61h", "halted (or not) wrongly",
-	"a decode the IBM BIOS never writes (code 6/7, 19h bit 3 = 0)"
+	"a decode the IBM BIOS never writes (code 6/7, 19h bits 3/7 = 0, 14h banks)"
 };
 
 struct result {
@@ -210,7 +210,7 @@ static int check(struct simm p0, struct simm p1, const struct result *r, const s
 		fails |= TOP;
 	if (faulty && memcmp(r->regs, clean->regs, 3))
 		fails |= FAULT_REGS;
-	if ((r->regs[0] & 0x88) != 0x88 || (r->regs[1] & 0x88) != 0x80 || r->regs[2] != 0x88 || model_top(r->regs) != best)
+	if ((r->regs[0] & 0x88) != 0x88 || r->regs[1] != 0x80 || (r->regs[2] & 0x88) != 0x88 || model_top(r->regs) != best)
 		fails |= REGS;
 	for (int reg = 0; reg < 256; reg++)
 		if (reg != 0x13 && reg != 0x14 && reg != 0x19 && m->regs[reg])

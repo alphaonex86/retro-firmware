@@ -19,8 +19,8 @@ if [ $# -eq 0 ]; then
   exit 0
 fi
 
-read -r p0 p1 kb r13 r14 _ <<< "$*"
-codes="$((16#$r13 & 7)) $((16#$r13 >> 4 & 7)) $((16#$r14 & 7)) $((16#$r14 >> 4 & 7))"
+read -r p0 p1 kb r13 _ r19 _ <<< "$*"
+codes="$((16#$r13 & 7)) $((16#$r13 >> 4 & 7)) $((16#$r19 & 7)) $((16#$r19 >> 4 & 7))"
 vm_dir=$vm_dir/${p0}_$p1
 vm_ram=$(opti_ram_cfg "$p0" "$p1")
 extra="" sb_extra=()
