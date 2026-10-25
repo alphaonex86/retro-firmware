@@ -5,7 +5,9 @@
    31 injects one A and one B fault at iteration 2, and with bit 30 one checksum fault (self-test);
    30 interrupts: own IDT, 8259s at 20h/28h, PIT channel 0 at 1 kHz on IRQ0 (it checksums a 4 KB region), the USB IOC
       interrupt on the IRQ of the controller's 3Ch, waits in hlt; every handler checks a stack pattern; counted per
-      iteration: IRQ0, USB, spurious IRQ7/15, and the errors wrong vector, stack and checksum mismatch;
+      iteration: IRQ0, USB, spurious IRQ7/15, and the errors wrong vector, stack and checksum mismatch; IRQ0 is the
+      clock (the BIOS one reads PIT channel 0); the interrupt state is printed 100 ms after the setup and on a USB
+      failure;
    29 EHCI high speed (CONFIGFLAG 1, async QHs and qTDs); clear: the EHCI is halted, the UHCIs own the ports. */
 #include "nbmon_api.h"
 
@@ -56,9 +58,10 @@ static int CardDev, UsbFn, UsbIrq, Ehci, Irq, IrqActive, ExceptionVector;
 static int Addr, Mps0, EpIn, EpOut, MpsBulk, ToggleIn, ToggleOut, NTd, First[3], Last[3];
 static volatile uint32_t Count[NCOUNTS];
 static uint32_t CountPrinted[NCOUNTS];
+static const char *const CountName[NCOUNTS] = { " irq0 ", " usb ", " spur ", " vec ", " stack ", " sum " };
 static void *Recover[5];
 static struct idtr SavedIdtr;
-static uint8_t SavedMask[2];
+static uint8_t SavedMask[2], Mask[2];
 
 static void outb(uint16_t port, uint8_t v) { __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(port)); }
 static void outw(uint16_t port, uint16_t v) { __asm__ volatile("outw %0, %1" : : "a"(v), "Nd"(port)); }
@@ -117,10 +120,26 @@ fail(const char *what, uint32_t v)
     return -1;
 }
 
+/* The BIOS clock reads PIT channel 0: while it runs at 1 kHz for us, IRQ0 is the clock (in hlt). */
+static uint32_t
+now_ms(void)
+{
+    return IrqActive ? Count[C_IRQ0] : Api->ticks();
+}
+
+static void
+delay_ms(uint32_t ms)
+{
+    if (!IrqActive)
+        Api->mdelay(ms);
+    for (uint32_t start = Count[C_IRQ0]; IrqActive && Count[C_IRQ0] - start <= ms;)
+        __asm__ volatile("hlt");
+}
+
 static int
 wait_bits(uint16_t port, uint16_t mask, uint16_t want)
 {
-    for (int ms = 0; ms < 20; ms++, Api->mdelay(1))
+    for (int ms = 0; ms < 20; ms++, delay_ms(1))
         if ((inw(port) & mask) == want)
             return 0;
     return -1;
@@ -129,7 +148,7 @@ wait_bits(uint16_t port, uint16_t mask, uint16_t want)
 static int
 wait_ereg(uint32_t reg, uint32_t mask, uint32_t want)
 {
-    for (int ms = 0; ms < 20; ms++, Api->mdelay(1))
+    for (int ms = 0; ms < 20; ms++, delay_ms(1))
         if ((*ereg(reg) & mask) == want)
             return 0;
     return fail("EHCI timeout, register value", *ereg(reg));
@@ -276,8 +295,8 @@ irq_on(void)
     ChecksumRef = checksum();
     SavedMask[0] = inb(0x21), SavedMask[1] = inb(0xa1);
     pic_init(0x20, 0x28);
-    outb(0x21, ~(1 | (UsbIrq < 8 ? 1 << UsbIrq : 4)));
-    outb(0xa1, UsbIrq < 8 ? 0xff : ~(1 << (UsbIrq - 8)));
+    Mask[0] = ~(1 | (UsbIrq < 8 ? 1 << UsbIrq : 4)), Mask[1] = UsbIrq < 8 ? 0xff : ~(1 << (UsbIrq - 8));
+    outb(0x21, Mask[0]), outb(0xa1, Mask[1]);
     pit0(1193);
     IrqActive = 1;
     __asm__ volatile("sti");
@@ -294,6 +313,85 @@ irq_off(void)
     pic_init(0x08, 0x70);
     outb(0x21, SavedMask[0]), outb(0xa1, SavedMask[1]);
     __asm__ volatile("lidt %0" : : "m"(SavedIdtr));
+}
+
+static void
+put_reg(const char *name, uint32_t v, int digits)
+{
+    put_str(name);
+    put_hex(v, digits);
+}
+
+static void
+put_pic(uint16_t cmd)
+{
+    outb(cmd, 0x0a);
+    put_reg(" IRR ", inb(cmd), 2);
+    outb(cmd, 0x0b);
+    put_reg(" ISR ", inb(cmd), 2);
+    put_reg(" IMR ", inb(cmd + 1), 2);
+}
+
+/* The interrupt state: counts, 8259s (and the 82C558M's shadows of what they were written, 80h-8Eh by 22h/24h),
+   EFLAGS.IF, the controller, the 82C558M's PCI routing (40h-43h, 50h-53h). */
+static void
+irq_diag(void)
+{
+    uint32_t eflags;
+    __asm__ volatile("pushfl; popl %0" : "=r"(eflags));
+    put_str("usbdma: counts");
+    for (int c = 0; c < NCOUNTS; c++) {
+        put_str(CountName[c]);
+        put_dec(Count[c]);
+    }
+    put_str("\r\nusbdma: 8259 master");
+    put_pic(0x20);
+    put_str(", slave");
+    put_pic(0xa0);
+    put_reg(", IF ", eflags >> 9 & 1, 1);
+    put_str("\r\nusbdma: wrote ICW1 11/11 ICW2 20/28 ICW3 04/02 ICW4 01/01");
+    put_reg(" OCW1 ", Mask[0], 2);
+    put_reg("/", Mask[1], 2);
+    put_str(", PIT 34 04a9; shadows 80h-8Eh");
+    for (int i = 0x80; i < 0x8f; i++) {
+        outb(0x22, i);
+        put_reg(" ", inb(0x24), 2);
+    }
+    if (Ehci) {
+        put_reg("\r\nusbdma: EHCI USBCMD ", *ereg(E_CMD), 8);
+        put_reg(" USBSTS ", *ereg(E_STS), 8);
+        put_reg(" USBINTR ", *ereg(E_INTR), 8);
+        put_reg(" FRINDEX ", *ereg(0xc), 8);
+        put_reg(" PORTSC ", *ereg(EhciPort), 8);
+    } else {
+        put_reg("\r\nusbdma: UHCI USBCMD ", inw(Io), 4);
+        put_reg(" USBSTS ", inw(Io + 2), 4);
+        put_reg(" USBINTR ", inw(Io + 4), 4);
+        put_reg(" FRNUM ", inw(Io + 6), 4);
+        put_reg(" PORTSC ", inw(PortReg), 4);
+    }
+    put_reg("\r\nusbdma: 82C558M 40h ", pci_read(1, 0, 0x40), 8);
+    put_reg(" 50h ", pci_read(1, 0, 0x50), 8);
+    put_str("\r\n");
+}
+
+/* Interrupts on, then 100 ms counted by polling PIT channel 0 (its reloads): IRQ0 must have come about 100 times,
+   else there is no clock for the waits. */
+static int
+irq_start(void)
+{
+    irq_on();
+    uint16_t last = 0;
+    for (int reloads = 0; reloads < 100;) {
+        outb(0x43, 0);
+        uint16_t now = inb(0x40);
+        now |= inb(0x40) << 8;
+        reloads += now > last;
+        last = now;
+    }
+    put_str("usbdma: 100 ms after the IDT/PIC setup\r\n");
+    irq_diag();
+    return Count[C_IRQ0] < 50 ? fail("IRQ0 not delivered, count", Count[C_IRQ0]) : 0;
 }
 
 /****************************************************************
@@ -397,13 +495,13 @@ idle(void)
 static int
 uhci_wait(uint32_t timeout_ms)
 {
-    uint32_t start = Api->ticks(), element;
+    uint32_t start = now_ms(), element;
     while (!((element = QH[1]) & 1)) {
         uint32_t status = ((volatile struct td *)(element & ~0xfu))->status;
         if (!(status & TD_ACTIVE) && (status & TD_ERRORS))
             return QH[1] = 1, fail("TD error, status", status);
-        if (Api->ticks() - start > timeout_ms)
-            return QH[1] = 1, fail("timeout at TD", element);
+        if (now_ms() - start > timeout_ms)
+            return QH[1] = 1, fail("timeout at TD", element), fail("its status", status);
         idle();
     }
     for (int i = 0; i < NTd; i++)
@@ -415,7 +513,7 @@ uhci_wait(uint32_t timeout_ms)
 static int
 ehci_wait(uint32_t timeout_ms)
 {
-    uint32_t start = Api->ticks();
+    uint32_t start = now_ms();
     for (int i = 0; i < NTd;) {
         uint32_t token = QTDS[i].token;
         if (token & Q_HALTED)
@@ -424,8 +522,8 @@ ehci_wait(uint32_t timeout_ms)
             return fail("short packet, token", token);
         if (!(token & Q_ACTIVE))
             i++;
-        else if (Api->ticks() - start > timeout_ms)
-            return fail("timeout at qTD", (uint32_t)&QTDS[i]);
+        else if (now_ms() - start > timeout_ms)
+            return fail("timeout at qTD", (uint32_t)&QTDS[i]), fail("its token", token);
         else
             idle();
     }
@@ -436,9 +534,11 @@ ehci_wait(uint32_t timeout_ms)
 static int
 queue_wait(uint32_t timeout_ms)
 {
+    int r = Ehci ? ehci_wait(timeout_ms) : uhci_wait(timeout_ms);
+    if (r && Irq)
+        irq_diag();
     if (!Ehci)
-        return uhci_wait(timeout_ms);
-    int r = ehci_wait(timeout_ms);
+        return r;
     if (ehci_async(0))
         return -1;
     ToggleOut = EQH(1)[6] >> 31, ToggleIn = EQH(2)[6] >> 31;
@@ -587,11 +687,11 @@ uhci_setup(void)
     outw(Io + 2, 0x3f);
     outw(Io, CMD_RS | CMD_CF | CMD_MAXP);
     outw(PortReg, PORT_PR);
-    Api->mdelay(50);
+    delay_ms(50);
     outw(PortReg, 0);
-    Api->mdelay(1);
+    delay_ms(1);
     outw(PortReg, PORT_PE | PORT_CSC | PORT_PEC);
-    Api->mdelay(10);
+    delay_ms(10);
     if (!(inw(PortReg) & PORT_PE))
         return fail("port not enabled, PORTSC", inw(PortReg));
     return 0;
@@ -612,16 +712,16 @@ ehci_setup(void)
     *ereg(E_CONFIGFLAG) = 1;
     for (int p = 0; p < 4; p++)
         *ereg(E_PORTSC + 4 * p) = EP_PP;
-    Api->mdelay(100);
+    delay_ms(100);
     if (!pick_ehci_port(2 * STICK_FN + STICK_PORT) && !pick_ehci_port(0) && !pick_ehci_port(1)
         && !pick_ehci_port(2) && !pick_ehci_port(3))
         return fail("no device on the EHCI ports", 0);
     *ereg(EhciPort) = EP_PP | EP_PR;
-    Api->mdelay(50);
+    delay_ms(50);
     *ereg(EhciPort) = EP_PP;
     if (wait_ereg(EhciPort, EP_PR, 0))
         return -1;
-    Api->mdelay(10);
+    delay_ms(10);
     if (!(*ereg(EhciPort) & EP_PE))
         return fail("not high speed, PORTSC", *ereg(EhciPort));
     return 0;
@@ -641,7 +741,7 @@ setup_controllers(void)
     if (wait_ereg(E_STS, E_HALTED, E_HALTED))
         return -1;
     *ereg(E_CONFIGFLAG) = 0;
-    Api->mdelay(100);
+    delay_ms(100);
     if (Ehci ? ehci_setup() : uhci_setup())
         return -1;
     UsbIrq = pci_read(CardDev, UsbFn, 0x3c) & 0xff;
@@ -670,7 +770,7 @@ setup_stick(void)
     if (control(0, 5, 1, 0))
         return -1;
     Addr = 1;
-    Api->mdelay(10);
+    delay_ms(10);
     if (control(0x80, 6, 0x200, 9))
         return -1;
     int total = d[2] | d[3] << 8, msc = 0;
@@ -709,7 +809,7 @@ setup_stick(void)
             return 0;
         if (status < 0 || try == 20 || scsi(sense, 6, 18) < 0)
             return fail("not ready, sense key", d[2]);
-        Api->mdelay(100);
+        delay_ms(100);
     }
 }
 
@@ -803,12 +903,11 @@ checksum_fault(void)
 static uint32_t
 put_counts(void)
 {
-    static const char *const names[NCOUNTS] = { " irq0 ", " usb ", " spur ", " vec ", " stack ", " sum " };
     uint32_t errors = 0;
     for (int c = 0; c < NCOUNTS; c++) {
         uint32_t now = Count[c], n = now - CountPrinted[c];
         CountPrinted[c] = now;
-        put_str(names[c]);
+        put_str(CountName[c]);
         put_dec(n);
         if (c >= C_VEC)
             errors += n;
@@ -884,13 +983,10 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     uint32_t errors = ~0u;
     if (__builtin_setjmp(Recover))
         errors = 0xe0000000u | ExceptionVector;
-    else if (!setup_controllers()) {
-        if (Irq)
-            irq_on();
+    else if (!setup_controllers() && (!Irq || !irq_start()))
         errors = setup_stick() ? ~0u : run_test(arg & 0x1fffffff, arg >> 31);
-    }
-    teardown();
     irq_off();
+    teardown();
     put_str("usbdma: errors ");
     put_dec(errors);
     put_str("\r\n");
