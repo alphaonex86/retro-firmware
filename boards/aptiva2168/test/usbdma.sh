@@ -4,13 +4,15 @@
 # its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
 # IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
 # error), on the EHCI at high speed (bit 29), and both; with A at 00500000 (bits 16-23), in 16 slots (bit 28), and
-# with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault).
+# with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault); the same
+# with write+readback (bit 26, also with wbinvd: bit 25), its self-test flipping a byte of the read back.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
 vm_dir=$nb/test/vm/aptiva2168-usbdma
 mkdir -p "$vm_dir"
 head -c 16M /dev/urandom > "$vm_dir/usb.img"
+truncate -s 128M "$vm_dir/usb.img"   # bit 26 writes at LBA 37800h
 export vm_machine=aptiva2168 BOX86_USB_DISK=$vm_dir/usb.img
 vm_ram=$(opti_ram_cfg 0 4)
 vm_start usbdma "$rom"
@@ -53,4 +55,11 @@ out=$(nbmon call 100000 88000003) || fail "shared lines self-test call: $(tail -
 grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 G 1 @00120020 x00000100$" <<< "$out" \
   && grep -q "^  G 00120020 got" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
   || fail "shared lines self-test: guard fault not reported: $out"
+clean_run 0400000a "UHCI" " W 0" 10 "[0-9a-f]*"
+clean_run 6600000a "EHCI" " W 0$irqs" 10 "[0-9a-f]*"
+clean_run 2c00000a "EHCI" " W 0 G 0" 10 "[0-9a-f]*"
+out=$(nbmon call 100000 84000003) || fail "write+readback self-test call: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 0 B 1 @00463450 x00010000 W 1 @00001234 x00000040$" <<< "$out" \
+  && grep -q "^  W 00141234 got" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000002 ] \
+  || fail "write+readback self-test: A2 fault not reported: $out"
 vm_stop
