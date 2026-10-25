@@ -3,7 +3,7 @@
 # with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
 # its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
 # IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
-# error), on the EHCI at high speed (bit 29), and both.
+# error), on the EHCI at high speed (bit 29), and both; with A at 00500000 (bits 16-23), and in 16 slots (bit 28).
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -41,4 +41,7 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
 clean_run 40000014 "UHCI" "$irqs"
 clean_run 20000014 "EHCI" ""
 clean_run 60000014 "EHCI" "$irqs"
+clean_run 00500014 "UHCI" ""
+clean_run 70000014 "EHCI" " slot [0-9a-f]*$irqs"
+[ "$(grep -o " slot [0-9a-f]*" <<< "$out" | sort -u | wc -l)" = 16 ] || fail "arg 70000014: not 16 A slots: $out"
 vm_stop

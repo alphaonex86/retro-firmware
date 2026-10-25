@@ -1,7 +1,10 @@
 /* NBMON payload: the suspected USB-DMA memory corruption of the A90's VT6212, without Linux. The stick (STICK_FN/
-   STICK_PORT first, else the first device found) is reset and configured; then "arg" & 1FFFFFFFh iterations of a
-   bulk-only READ(10) of 64 KB at LBA into A, while the CPU writes and verifies a rotating address pattern over B. Own
+   STICK_PORT first, else the first device found) is reset and configured; then "arg" & FFFFh iterations of a
+   bulk-only READ(10) of 64 KB at LBA into A, while the CPU writes and verifies a rotating address pattern over B: the
+   free RAM [FREE_LO, FREE_HI) less A, the schedule (64 KB after A) and the first read (after the schedule). Own
    schedule. Returns the error count (FFFFFFFF: no test; E00000vv: CPU exception vv). Load at 00100000. Arg bits:
+   16-23 A's base in 64 KB units (0: 00120000);
+   28 each iteration reads into another of 16 A slots, 384 KB apart from the base, wrapping in the free RAM;
    31 injects one A and one B fault at iteration 2, and with bit 30 one checksum fault (self-test);
    30 interrupts: own IDT, 8259s at 20h/28h, PIT channel 0 at 1 kHz on IRQ0 (it checksums a 4 KB region), the USB IOC
       interrupt on the IRQ of the controller's 3Ch, waits in hlt; every handler checks a stack pattern; counted per
@@ -17,12 +20,12 @@
 #define LBA         0
 #define BLOCKS      128
 
-#define RAM_DMA     0x00110000u   /* frame list, QHs, control/BOT buffers, TDs, checksum region, IDT */
-#define RAM_A       0x00120000u
-#define RAM_REF     0x00130000u   /* the first read */
-#define RAM_B_LO    0x00140000u
-#define RAM_B_HI    0x00770000u   /* free RAM ends at 0077f1e0 */
+#define FREE_LO     0x00110000u   /* after the payload */
+#define FREE_HI     0x00770000u   /* free RAM ends at 0077f1e0 */
+#define CHUNK       0x10000u      /* A, the schedule, the first read and the parts of B */
+#define NCHUNKS     ((FREE_HI - FREE_LO) / CHUNK)
 #define READ_LEN    (BLOCKS * 512)
+#define RAM_DMA     Dma           /* frame list, QHs, control/BOT buffers, TDs, checksum region, IDT */
 
 #define FRAME_LIST  ((volatile uint32_t *)RAM_DMA)
 #define QH          ((volatile uint32_t *)(RAM_DMA + 0x1000))
@@ -52,6 +55,7 @@ struct frame { uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax, vector, error, e
 struct idtr { uint16_t limit; uint32_t base; } __attribute__((packed));
 
 static const struct nbmon_api *Api;
+static uint32_t Base, RamA, Dma, Ref, Legsup[2];
 static uint16_t UhciIo[2], Io, PortReg;
 static uint32_t EhciOp, EhciPort, Tag, ChecksumRef;
 static int CardDev, UsbFn, UsbIrq, Ehci, Irq, IrqActive, ExceptionVector;
@@ -613,6 +617,7 @@ find_card(void)
         if (pci_read(dev, 2, 0) == VT6212_EHCI) {
             for (int fn = 0; fn < 2; fn++) {
                 UhciIo[fn] = pci_read(dev, fn, 0x20) & 0xffe0;
+                Legsup[fn] = pci_read(dev, fn, 0xc0) & 0xffff;
                 pci_write(dev, fn, 4, pci_read(dev, fn, 4) | 5);   /* I/O, bus master */
             }
             pci_write(dev, 2, 4, pci_read(dev, 2, 4) | 6);         /* memory, bus master */
@@ -627,10 +632,21 @@ find_card(void)
             put_hex(UhciIo[1], 4);
             put_str(", EHCI ");
             put_hex(bar, 8);
+            put_str(", UHCI C0h ");
+            put_hex(Legsup[0], 4);
+            put_str(" ");
+            put_hex(Legsup[1], 4);
             put_str("\r\n");
             return 0;
         }
     return fail("no VT6212 EHCI", VT6212_EHCI);
+}
+
+/* UHCI LEGSUP (C0h): 2000h, the PIRQ enable alone, as Linux sets it */
+static void
+legsup_write(int fn, uint32_t v)
+{
+    pci_write(CardDev, fn, 0xc0, (pci_read(CardDev, fn, 0xc0) & 0xffff0000u) | v);
 }
 
 static void
@@ -732,6 +748,7 @@ setup_controllers(void)
 {
     for (int fn = 0; fn < 2; fn++) {
         uhci_stop(UhciIo[fn]);
+        legsup_write(fn, 0x2000);
         outw(UhciIo[fn], CMD_HCRESET);
         if (wait_bits(UhciIo[fn], CMD_HCRESET, 0))
             return fail("UHCI reset, io", UhciIo[fn]);
@@ -817,8 +834,10 @@ static void
 teardown(void)
 {
     QH[1] = 1;
-    for (int fn = 0; fn < 2; fn++)
+    for (int fn = 0; fn < 2; fn++) {
         uhci_stop(UhciIo[fn]);
+        legsup_write(fn, Legsup[fn]);
+    }
     *ereg(E_INTR) = 0;
     *ereg(E_CMD) &= ~(E_RS | E_ASE);
     wait_ereg(E_STS, E_HALTED, E_HALTED);
@@ -849,11 +868,10 @@ fill(uint32_t lo, uint32_t hi, uint32_t seed)
         *p = (uint32_t)p ^ seed;
 }
 
-/* Words of [lo, hi) unlike ref (0: the fill pattern of seed); the first 4 printed. */
+/* Words of [lo, hi) unlike ref (0: the fill pattern of seed), added to d; the first 4 printed. */
 static void
 compare(const char *name, uint32_t lo, uint32_t hi, uint32_t ref, uint32_t seed, struct diff *d)
 {
-    d->n = 0;
     for (volatile uint32_t *p = mmio(lo); (uint32_t)p < hi; p++) {
         uint32_t want = ref ? *mmio(ref + ((uint32_t)p - lo)) : (uint32_t)p ^ seed, got = *p;
         if (got == want)
@@ -887,6 +905,29 @@ put_diff(const char *name, const struct diff *d)
     }
 }
 
+static int
+in_b(uint32_t addr)
+{
+    addr &= ~(CHUNK - 1);
+    return addr != RamA && addr != Dma && addr != Ref;
+}
+
+static void
+fill_b(uint32_t seed)
+{
+    for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
+        if (in_b(c))
+            fill(c, c + CHUNK, seed);
+}
+
+static void
+compare_b(uint32_t seed, struct diff *d)
+{
+    for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
+        if (in_b(c))
+            compare("B", c, c + CHUNK, 0, seed, d);
+}
+
 /* Self-test: one IRQ0 sees a word of the checksummed region changed */
 static void
 checksum_fault(void)
@@ -916,7 +957,7 @@ put_counts(void)
 }
 
 static uint32_t
-run_test(uint32_t iterations, int inject)
+run_test(uint32_t iterations, int inject, int slots)
 {
     static const uint32_t seeds[4] = { 0, 0xffffffff, 0xa5a5a5a5, 0x5a5a5a5a };
     static const uint8_t read10[10] = { 0x28, 0, LBA >> 24, LBA >> 16 & 255, LBA >> 8 & 255, LBA & 255, 0,
@@ -929,14 +970,20 @@ run_test(uint32_t iterations, int inject)
         put_str("\r\n");
     }
     for (uint32_t it = 0; it < iterations; it++) {
-        fill(RAM_A, RAM_A + READ_LEN, 0xdeadbeef ^ it);   /* the read must replace what the CPU wrote */
-        int status = scsi_start(read10, 10, RAM_A, READ_LEN) ? -1 : 0;
-        fill(RAM_B_LO, RAM_B_HI, seeds[it & 3]);
+        if (slots)
+            RamA = FREE_LO + ((Base - FREE_LO) / CHUNK + 6 * (it % 16)) % NCHUNKS * CHUNK;   /* never the schedule */
+        a.n = b.n = 0;
+        fill(RamA, RamA + READ_LEN, 0xdeadbeef ^ it);   /* the read must replace what the CPU wrote */
+        int status = scsi_start(read10, 10, RamA, READ_LEN) ? -1 : 0;
+        fill_b(seeds[it & 3]);
+        uint32_t bad = 0x463450;
+        while (!in_b(bad))
+            bad += CHUNK;
         if (inject && it == 1)
-            *mmio(RAM_B_LO + 0x323450) ^= 0x10000;
+            *mmio(bad) ^= 0x10000;
         if (inject && it == 1 && Irq)
             checksum_fault();
-        compare("B", RAM_B_LO, RAM_B_HI, 0, seeds[it & 3], &b);
+        compare_b(seeds[it & 3], &b);
         if (!status)
             status = scsi_wait();
         if (status) {
@@ -946,14 +993,14 @@ run_test(uint32_t iterations, int inject)
             return errors + 1;
         }
         if (inject && it == 1)
-            bytes(RAM_A + 0x1234)[0] ^= 0x40;
-        uint32_t crc = crc32(RAM_A, READ_LEN);
+            bytes(RamA + 0x1234)[0] ^= 0x40;
+        uint32_t crc = crc32(RamA, READ_LEN);
         if (!it) {
             ref = crc;
             for (uint32_t off = 0; off < READ_LEN; off += 4)
-                *mmio(RAM_REF + off) = *mmio(RAM_A + off);
+                *mmio(Ref + off) = *mmio(RamA + off);
         }
-        compare("A", RAM_A, RAM_A + READ_LEN, RAM_REF, 0, &a);
+        compare("A", RamA, RamA + READ_LEN, Ref, 0, &a);
         errors += a.n + b.n + (!a.n && crc != ref);
         put_str("it ");
         put_dec(it + 1);
@@ -962,6 +1009,10 @@ run_test(uint32_t iterations, int inject)
         put_str(crc == ref ? " OK" : " BAD");
         put_diff(" A ", &a);
         put_diff(" B ", &b);
+        if (slots) {
+            put_str(" slot ");
+            put_hex(RamA, 8);
+        }
         if (Irq)
             errors += put_counts();
         put_str("\r\n");
@@ -973,9 +1024,21 @@ NBMON_ENTRY uint32_t
 usbdma(uint32_t arg, const struct nbmon_api *api)
 {
     Api = api;
-    if ((uint32_t)usbdma < 0x100000 || (uint32_t)usbdma + 0x10000 > RAM_DMA)
+    if ((uint32_t)usbdma < 0x100000 || (uint32_t)usbdma + 0x10000 > FREE_LO)
         return fail("load at 00100000, not", (uint32_t)usbdma), ~0u;
     Irq = arg >> 30 & 1, Ehci = arg >> 29 & 1;
+    Base = RamA = arg & 0xff0000 ? arg & 0xff0000 : 0x120000;
+    Dma = Base + CHUNK, Ref = Base + 2 * CHUNK;
+    if (Base < FREE_LO || Ref + CHUNK > FREE_HI)
+        return fail("A base not in 00110000-00740000:", Base), ~0u;
+    put_str("usbdma: A ");
+    put_hex(Base, 8);
+    put_str(arg >> 28 & 1 ? " (16 slots)" : "");
+    put_str(", schedule ");
+    put_hex(Dma, 8);
+    put_str(", first read ");
+    put_hex(Ref, 8);
+    put_str(", B the rest of 00110000-0076ffff\r\n");
     for (int c = 0; c < NCOUNTS; c++)
         Count[c] = CountPrinted[c] = 0;
     if (find_card())
@@ -984,7 +1047,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     if (__builtin_setjmp(Recover))
         errors = 0xe0000000u | ExceptionVector;
     else if (!setup_controllers() && (!Irq || !irq_start()))
-        errors = setup_stick() ? ~0u : run_test(arg & 0x1fffffff, arg >> 31);
+        errors = setup_stick() ? ~0u : run_test(arg & 0xffff, arg >> 31, arg >> 28 & 1);
     irq_off();
     teardown();
     put_str("usbdma: errors ");
