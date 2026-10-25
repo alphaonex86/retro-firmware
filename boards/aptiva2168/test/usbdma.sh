@@ -3,7 +3,8 @@
 # with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
 # its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
 # IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
-# error), on the EHCI at high speed (bit 29), and both; with A at 00500000 (bits 16-23), and in 16 slots (bit 28).
+# error), on the EHCI at high speed (bit 29), and both; with A at 00500000 (bits 16-23), in 16 slots (bit 28), and
+# with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault).
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -30,10 +31,11 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
   && [ "$(grep -c "^it [13] crc $crc OK A 0 B 0$" <<< "$out")" = 2 ] && [ "$(tail -n 1 <<< "$out")" = 00000002 ] \
   || fail "self-test faults not reported: $out"
 irqs=" irq0 [1-9][0-9]* usb [1-9][0-9]* spur 0 vec 0 stack 0 sum 0"
-clean_run() {  # arg, controller line, iteration line suffix
+clean_run() {  # arg, controller line, iteration line suffix, [iterations, CRC]
+  local n=${4:-20} c=${5:-$crc}
   out=$(nbmon call 100000 "$1") || fail "call $1: $(tail -n 4 "$vm/nbmon.log")"
-  grep -q "^usbdma: stick on $2" <<< "$out" && [ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$3$" <<< "$out")" = 20 ] \
-    && [ "$(tail -n 1 <<< "$out")" = 00000000 ] || fail "arg $1, 20 clean reads of CRC $crc on $2: $out"
+  grep -q "^usbdma: stick on $2" <<< "$out" && [ "$(grep -c "^it [0-9]* crc $c OK A 0 B 0$3$" <<< "$out")" = "$n" ] \
+    && [ "$(tail -n 1 <<< "$out")" = 00000000 ] || fail "arg $1, $n clean reads of CRC $c on $2: $out"
 }
 out=$(nbmon call 100000 c0000003) || fail "self-test call with interrupts: $(tail -n 4 "$vm/nbmon.log")"
 grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 irq0 [0-9]* usb [0-9]* spur 0 vec 0 stack 0 sum 1$" \
@@ -44,4 +46,11 @@ clean_run 60000014 "EHCI" "$irqs"
 clean_run 00500014 "UHCI" ""
 clean_run 70000014 "EHCI" " slot [0-9a-f]*$irqs"
 [ "$(grep -o " slot [0-9a-f]*" <<< "$out" | sort -u | wc -l)" = 16 ] || fail "arg 70000014: not 16 A slots: $out"
+crc127=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65024)))' "$vm_dir/usb.img")
+clean_run 2800000a "EHCI" " G 0" 10 "$crc127"
+clean_run 4800000a "UHCI" " G 0$irqs" 10 "$crc127"
+out=$(nbmon call 100000 88000003) || fail "shared lines self-test call: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 G 1 @00120020 x00000100$" <<< "$out" \
+  && grep -q "^  G 00120020 got" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
+  || fail "shared lines self-test: guard fault not reported: $out"
 vm_stop

@@ -5,6 +5,10 @@
    schedule. Returns the error count (FFFFFFFF: no test; E00000vv: CPU exception vv). Load at 00100000. Arg bits:
    16-23 A's base in 64 KB units (0: 00120000);
    28 each iteration reads into another of 16 A slots, 384 KB apart from the base, wrapping in the free RAM;
+   27 shared lines: the read (127 blocks) starts at A + 24h, mid 32-byte line, and every UHCI TD has a line of its own;
+      the CPU keeps rewriting the rest of those lines (guards: around the read, after each TD and the UHCI QH, the
+      EHCI QHs' spare dwords 12-15, after the CSW) with a counter, before each start, while it waits and between
+      the 64 KB parts of B; after each transfer the guards must hold the last value (G: the mismatches);
    31 injects one A and one B fault at iteration 2, and with bit 30 one checksum fault (self-test);
    30 interrupts: own IDT, 8259s at 20h/28h, PIT channel 0 at 1 kHz on IRQ0 (it checksums a 4 KB region), the USB IOC
       interrupt on the IRQ of the controller's 3Ch, waits in hlt; every handler checks a stack pattern; counted per
@@ -34,7 +38,6 @@
 #define CSW         (RAM_DMA + 0x1160)
 #define CTL         (RAM_DMA + 0x1200)
 #define EQH(q)      ((volatile uint32_t *)(RAM_DMA + 0x1400 + 0x40 * (q)))   /* EHCI: control, bulk out, bulk in */
-#define TDS         ((volatile struct td *)(RAM_DMA + 0x2000))
 #define QTDS        ((volatile struct qtd *)(RAM_DMA + 0x2000))
 #define CHECKED     (RAM_DMA + 0xe000)                                       /* 4 KB, summed by IRQ0 */
 #define IDT         ((volatile uint32_t *)(RAM_DMA + 0xf000))
@@ -51,11 +54,13 @@ enum { C_IRQ0, C_USB, C_SPUR, C_VEC, C_STACK, C_SUM, NCOUNTS };   /* C_VEC and a
 struct td { uint32_t link, status, token, buffer; };
 struct qtd { uint32_t next, alt, token, buffer[5]; };
 struct diff { uint32_t n, first, xor; };
+static struct diff Guard;
 struct frame { uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax, vector, error, eip, cs, eflags; };
 struct idtr { uint16_t limit; uint32_t base; } __attribute__((packed));
 
 static const struct nbmon_api *Api;
-static uint32_t Base, RamA, Dma, Ref, Legsup[2];
+static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
+static int Shared, GuardInject;
 static uint16_t UhciIo[2], Io, PortReg;
 static uint32_t EhciOp, EhciPort, Tag, ChecksumRef;
 static int CardDev, UsbFn, UsbIrq, Ehci, Irq, IrqActive, ExceptionVector;
@@ -399,19 +404,80 @@ irq_start(void)
 }
 
 /****************************************************************
+ * Shared lines (arg bit 27)
+ ****************************************************************/
+
+static volatile struct td *
+td_at(int i)
+{
+    return (volatile struct td *)(RAM_DMA + 0x2000 + i * (Shared ? 32 : 16));
+}
+
+/* A word unlike want, added to d; the first 4 printed. */
+static void
+note(const char *name, uint32_t addr, uint32_t got, uint32_t want, struct diff *d)
+{
+    if (!d->n)
+        d->first = addr, d->xor = got ^ want;
+    if (d->n++ < 4) {
+        put_str("  ");
+        put_str(name);
+        put_str(" ");
+        put_hex(addr, 8);
+        put_str(" got ");
+        put_hex(got, 8);
+        put_str(" want ");
+        put_hex(want, 8);
+        put_str("\r\n");
+    }
+}
+
+static void
+guard_range(uint32_t addr, int dwords, int check)
+{
+    for (; dwords--; addr += 4)
+        if (!check)
+            *mmio(addr) = GuardValue;
+        else if (*mmio(addr) != GuardValue)
+            note("G", addr, *mmio(addr), GuardValue, &Guard);
+}
+
+/* Write the guards with a new counter value, or check them against the last one */
+static void
+guards(int check)
+{
+    if (!Shared)
+        return;
+    if (!check)
+        GuardValue++;
+    if (check && GuardInject)
+        *mmio(Buf - 4) ^= 0x100, GuardInject = 0;
+    guard_range(Buf - 4, 1, check);
+    guard_range(Buf + Len, (32 - (Buf + Len) % 32) / 4, check);
+    guard_range(CSW + 16, 4, check);
+    for (int q = 0; Ehci && q < 3; q++)
+        guard_range((uint32_t)EQH(q) + 48, 4, check);
+    if (Ehci)
+        return;
+    guard_range((uint32_t)QH + 8, 6, check);
+    for (int i = 0; i < NTd; i++)
+        guard_range((uint32_t)td_at(i) + 16, 4, check);
+}
+
+/****************************************************************
  * Transfers: UHCI TDs on one QH, or EHCI qTDs on three QHs; IOC on the last of each stage
  ****************************************************************/
 
 static void
 td_add(int pid, int ep, int toggle, uint32_t buf, int len, int ioc)
 {
-    volatile struct td *t = &TDS[NTd];
+    volatile struct td *t = td_at(NTd);
     t->link = 1;
     t->status = 3u << 27 | TD_ACTIVE | ioc << 24;
     t->token = (uint32_t)((len - 1) & 0x7ff) << 21 | toggle << 19 | ep << 15 | Addr << 8 | pid;
     t->buffer = buf;
     if (NTd)
-        TDS[NTd - 1].link = (uint32_t)t | 4;   /* depth first */
+        td_at(NTd - 1)->link = (uint32_t)t | 4;   /* depth first */
     NTd++;
 }
 
@@ -482,8 +548,9 @@ ehci_async(int on)
 static int
 queue_start(void)
 {
+    guards(0);
     if (!Ehci)
-        return QH[1] = (uint32_t)TDS, 0;
+        return QH[1] = (uint32_t)td_at(0), 0;
     for (int q = 0; q < 3; q++)
         ehci_qh_init(q);
     return ehci_async(1);
@@ -492,6 +559,7 @@ queue_start(void)
 static void
 idle(void)
 {
+    guards(0);
     if (Irq)
         __asm__ volatile("hlt");
 }
@@ -509,8 +577,8 @@ uhci_wait(uint32_t timeout_ms)
         idle();
     }
     for (int i = 0; i < NTd; i++)
-        if ((TDS[i].status ^ TDS[i].token >> 21) & 0x7ff)
-            return fail("short packet, status", TDS[i].status);
+        if ((td_at(i)->status ^ td_at(i)->token >> 21) & 0x7ff)
+            return fail("short packet, status", td_at(i)->status);
     return 0;
 }
 
@@ -541,6 +609,8 @@ queue_wait(uint32_t timeout_ms)
     int r = Ehci ? ehci_wait(timeout_ms) : uhci_wait(timeout_ms);
     if (r && Irq)
         irq_diag();
+    if (!r)
+        guards(1);
     if (!Ehci)
         return r;
     if (ehci_async(0))
@@ -868,27 +938,14 @@ fill(uint32_t lo, uint32_t hi, uint32_t seed)
         *p = (uint32_t)p ^ seed;
 }
 
-/* Words of [lo, hi) unlike ref (0: the fill pattern of seed), added to d; the first 4 printed. */
+/* Words of [lo, hi) unlike ref (0: the fill pattern of seed), added to d */
 static void
 compare(const char *name, uint32_t lo, uint32_t hi, uint32_t ref, uint32_t seed, struct diff *d)
 {
     for (volatile uint32_t *p = mmio(lo); (uint32_t)p < hi; p++) {
         uint32_t want = ref ? *mmio(ref + ((uint32_t)p - lo)) : (uint32_t)p ^ seed, got = *p;
-        if (got == want)
-            continue;
-        if (!d->n)
-            d->first = (uint32_t)p, d->xor = got ^ want;
-        if (d->n++ < 4) {
-            put_str("  ");
-            put_str(name);
-            put_str(" ");
-            put_hex((uint32_t)p, 8);
-            put_str(" got ");
-            put_hex(got, 8);
-            put_str(" want ");
-            put_hex(want, 8);
-            put_str("\r\n");
-        }
+        if (got != want)
+            note(name, (uint32_t)p, got, want, d);
     }
 }
 
@@ -917,7 +974,7 @@ fill_b(uint32_t seed)
 {
     for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            fill(c, c + CHUNK, seed);
+            fill(c, c + CHUNK, seed), guards(0);
 }
 
 static void
@@ -925,7 +982,7 @@ compare_b(uint32_t seed, struct diff *d)
 {
     for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            compare("B", c, c + CHUNK, 0, seed, d);
+            compare("B", c, c + CHUNK, 0, seed, d), guards(0);
 }
 
 /* Self-test: one IRQ0 sees a word of the checksummed region changed */
@@ -960,8 +1017,7 @@ static uint32_t
 run_test(uint32_t iterations, int inject, int slots)
 {
     static const uint32_t seeds[4] = { 0, 0xffffffff, 0xa5a5a5a5, 0x5a5a5a5a };
-    static const uint8_t read10[10] = { 0x28, 0, LBA >> 24, LBA >> 16 & 255, LBA >> 8 & 255, LBA & 255, 0,
-                                        BLOCKS >> 8, BLOCKS & 255, 0 };
+    uint8_t read10[10] = { 0x28, 0, LBA >> 24, LBA >> 16 & 255, LBA >> 8 & 255, LBA & 255, 0, 0, 0, 0 };
     uint32_t errors = 0, ref = 0;
     struct diff a, b;
     if (Irq) {
@@ -972,9 +1028,12 @@ run_test(uint32_t iterations, int inject, int slots)
     for (uint32_t it = 0; it < iterations; it++) {
         if (slots)
             RamA = FREE_LO + ((Base - FREE_LO) / CHUNK + 6 * (it % 16)) % NCHUNKS * CHUNK;   /* never the schedule */
+        Buf = RamA + (Shared ? 0x24 : 0);
+        read10[8] = Len / 512;
         a.n = b.n = 0;
+        GuardInject = inject && it == 1;
         fill(RamA, RamA + READ_LEN, 0xdeadbeef ^ it);   /* the read must replace what the CPU wrote */
-        int status = scsi_start(read10, 10, RamA, READ_LEN) ? -1 : 0;
+        int status = scsi_start(read10, 10, Buf, Len) ? -1 : 0;
         fill_b(seeds[it & 3]);
         uint32_t bad = 0x463450;
         while (!in_b(bad))
@@ -994,14 +1053,14 @@ run_test(uint32_t iterations, int inject, int slots)
         }
         if (inject && it == 1)
             bytes(RamA + 0x1234)[0] ^= 0x40;
-        uint32_t crc = crc32(RamA, READ_LEN);
+        uint32_t crc = crc32(Buf, Len);
         if (!it) {
             ref = crc;
-            for (uint32_t off = 0; off < READ_LEN; off += 4)
-                *mmio(Ref + off) = *mmio(RamA + off);
+            for (uint32_t off = 0; off < Len; off += 4)
+                *mmio(Ref + off) = *mmio(Buf + off);
         }
-        compare("A", RamA, RamA + READ_LEN, Ref, 0, &a);
-        errors += a.n + b.n + (!a.n && crc != ref);
+        compare("A", Buf, Buf + Len, Ref, 0, &a);
+        errors += a.n + b.n + (!a.n && crc != ref) + Guard.n;
         put_str("it ");
         put_dec(it + 1);
         put_str(" crc ");
@@ -1009,6 +1068,8 @@ run_test(uint32_t iterations, int inject, int slots)
         put_str(crc == ref ? " OK" : " BAD");
         put_diff(" A ", &a);
         put_diff(" B ", &b);
+        if (Shared)
+            put_diff(" G ", &Guard), Guard.n = 0;   /* the first one has those of the setup */
         if (slots) {
             put_str(" slot ");
             put_hex(RamA, 8);
@@ -1026,14 +1087,16 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     Api = api;
     if ((uint32_t)usbdma < 0x100000 || (uint32_t)usbdma + 0x10000 > FREE_LO)
         return fail("load at 00100000, not", (uint32_t)usbdma), ~0u;
-    Irq = arg >> 30 & 1, Ehci = arg >> 29 & 1;
+    Irq = arg >> 30 & 1, Ehci = arg >> 29 & 1, Shared = arg >> 27 & 1;
     Base = RamA = arg & 0xff0000 ? arg & 0xff0000 : 0x120000;
     Dma = Base + CHUNK, Ref = Base + 2 * CHUNK;
+    Buf = RamA + (Shared ? 0x24 : 0), Len = READ_LEN - (Shared ? 512 : 0);
     if (Base < FREE_LO || Ref + CHUNK > FREE_HI)
         return fail("A base not in 00110000-00740000:", Base), ~0u;
     put_str("usbdma: A ");
     put_hex(Base, 8);
     put_str(arg >> 28 & 1 ? " (16 slots)" : "");
+    put_str(Shared ? " + 24h, 127 blocks, shared lines" : "");
     put_str(", schedule ");
     put_hex(Dma, 8);
     put_str(", first read ");
@@ -1041,6 +1104,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     put_str(", B the rest of 00110000-0076ffff\r\n");
     for (int c = 0; c < NCOUNTS; c++)
         Count[c] = CountPrinted[c] = 0;
+    Guard.n = 0;
     if (find_card())
         return ~0u;
     uint32_t errors = ~0u;
