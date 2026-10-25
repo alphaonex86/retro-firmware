@@ -1,0 +1,30 @@
+#!/bin/bash
+# tools/nbmon/usbdma.c, the USB-DMA corruption payload for the real board, through tools/nbmon.py on the 8 MB board
+# with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
+# its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown.
+. "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
+rom=$nb/out/aptiva2168.rom
+[ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
+vm_dir=$nb/test/vm/aptiva2168-usbdma
+mkdir -p "$vm_dir"
+head -c 16M /dev/urandom > "$vm_dir/usb.img"
+export vm_machine=aptiva2168 BOX86_USB_DISK=$vm_dir/usb.img
+vm_ram=$(opti_ram_cfg 0 4)
+vm_start usbdma "$rom"
+nbmon() { timeout 300 python3 -I "$nb/tools/nbmon.py" --rx "$vm/serial.log" --tx "$vm/com1.in" --log "$vm/nbmon.log" "$@"; }
+range=$(nbmon --from-start wait 120) || fail "no monitor: $(tail -n 5 "$vm/nbmon.log")"
+[ "${range%-*}" = 00100000 ] && [ $((16#${range#*-})) -ge $((0x770000)) ] || fail "free range $range: not the payload's"
+cp "$nb/tools/nbmon/usbdma.c" "$vm_dir/usbdma.c"
+"$nb/tools/nbmon/payload.sh" "$vm_dir/usbdma.c" 100000 > /dev/null || fail "payload.sh"
+[ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt 65536 ] || fail "payload over 64 KB: it would reach its DMA area"
+nbmon load "$vm_dir/usbdma.bin" 100000 || fail "load"
+crc=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65536)))' "$vm_dir/usb.img")
+out=$(nbmon call 100000 14) || fail "call: $(tail -n 4 "$vm/nbmon.log")"
+[ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$" <<< "$out")" = 20 ] && [ "$(tail -n 1 <<< "$out")" = 00000000 ] \
+  || fail "20 clean reads of CRC $crc: $out"
+out=$(nbmon call 100000 80000003) || fail "self-test call: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000$" <<< "$out" \
+  && grep -q "^  A 00121234 got" <<< "$out" && grep -q "^  B 00463450 got" <<< "$out" \
+  && [ "$(grep -c "^it [13] crc $crc OK A 0 B 0$" <<< "$out")" = 2 ] && [ "$(tail -n 1 <<< "$out")" = 00000002 ] \
+  || fail "self-test faults not reported: $out"
+vm_stop

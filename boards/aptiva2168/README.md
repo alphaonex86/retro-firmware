@@ -161,6 +161,8 @@ Host side: `tools/nbmon.py --tty /dev/ttyUSBn ...` (or `--rx <vm>/serial.log --t
 logged to `--log`): `wait`, `cmd "<line>"`, `load FILE ADDR` (crc checked), `call ADDR [ARG]`, `boot`, `reset`,
 `loop SCRIPT [COUNT]` (takes each new `NBMON ready`, also after a crash or reset). Payloads: `tools/nbmon/payload.sh
 x.c ADDR` -> `x.bin` (example `tools/nbmon/hello.c`). Test: `boards/aptiva2168/test/nbmon.sh`.
+`tools/nbmon/usbdma.c` (at 00100000, arg = iterations, bit 31 = self-test): the stick on the UHCIs, 64 KB READ(10)s
+against the first one's CRC while the CPU checks a pattern over 6 MB; test `usbdma.sh`.
 
 ## Flashing from Linux
 
