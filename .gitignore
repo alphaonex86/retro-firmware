@@ -16,3 +16,6 @@
 /boards/aptiva2168/vgabios.bin
 /test/roms/rtl8139-operator-eeprom.txt
 __pycache__/
+# NBMON payload builds (tools/nbmon/payload.sh)
+/tools/nbmon/*.bin
+/tools/nbmon/*.elf

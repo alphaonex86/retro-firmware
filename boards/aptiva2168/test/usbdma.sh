@@ -1,7 +1,9 @@
 #!/bin/bash
 # tools/nbmon/usbdma.c, the USB-DMA corruption payload for the real board, through tools/nbmon.py on the 8 MB board
 # with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
-# its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown.
+# its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
+# IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
+# error), on the EHCI at high speed (bit 29), and both.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -27,4 +29,16 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
   && grep -q "^  A 00121234 got" <<< "$out" && grep -q "^  B 00463450 got" <<< "$out" \
   && [ "$(grep -c "^it [13] crc $crc OK A 0 B 0$" <<< "$out")" = 2 ] && [ "$(tail -n 1 <<< "$out")" = 00000002 ] \
   || fail "self-test faults not reported: $out"
+irqs=" irq0 [1-9][0-9]* usb [1-9][0-9]* spur 0 vec 0 stack 0 sum 0"
+clean_run() {  # arg, controller line, iteration line suffix
+  out=$(nbmon call 100000 "$1") || fail "call $1: $(tail -n 4 "$vm/nbmon.log")"
+  grep -q "^usbdma: stick on $2" <<< "$out" && [ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$3$" <<< "$out")" = 20 ] \
+    && [ "$(tail -n 1 <<< "$out")" = 00000000 ] || fail "arg $1, 20 clean reads of CRC $crc on $2: $out"
+}
+out=$(nbmon call 100000 c0000003) || fail "self-test call with interrupts: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 irq0 [0-9]* usb [0-9]* spur 0 vec 0 stack 0 sum 1$" \
+  <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "self-test checksum fault not reported: $out"
+clean_run 40000014 "UHCI" "$irqs"
+clean_run 20000014 "EHCI" ""
+clean_run 60000014 "EHCI" "$irqs"
 vm_stop
