@@ -26,7 +26,7 @@ cp "$nb/tools/nbmon/usbdma.c" "$vm_dir/usbdma.c"
 "$nb/tools/nbmon/payload.sh" "$vm_dir/usbdma.c" 100000 > /dev/null || fail "payload.sh"
 [ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt $((0xfff0)) ] || fail "payload over 64 KB - 16: it would reach its knobs"
 nbmon load "$vm_dir/usbdma.bin" 100000 || fail "load"
-nbmon cmd wl 10fff0 0 0 0 || fail "knobs"
+nbmon cmd wl 10fff0 0 0 0 0 || fail "knobs"
 crc=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65536)))' "$vm_dir/usb.img")
 out=$(nbmon call 100000 14) || fail "call: $(tail -n 4 "$vm/nbmon.log")"
 [ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$" <<< "$out")" = 20 ] && [ "$(tail -n 1 <<< "$out")" = 00000000 ] \
@@ -73,13 +73,13 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
   && grep -q "^  O qTD CBW out+40 6a6a0040 -> 6a6b0040 x1$" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
   || fail "overrun guards self-test: changed guard not reported: $out"
 clean_run 2080000a "EHCI" " F 0" 10
-nbmon cmd wl 10fff0 2 2 1 || fail "knobs"
+nbmon cmd wl 10fff0 2 2 1 64 || fail "knobs"
 clean_run 6080000a "EHCI" " F 0$irqs" 10
-grep -q "unlink: IAA x2, ASYNCLISTADDR off the slot, then 2 ms" <<< "$out" || fail "knobs not read: $out"
-nbmon cmd wl 10fff0 0 0 0 || fail "knobs"
+grep -q "unlink: IAA x2, ASYNCLISTADDR off the slot, then 2 ms, watch 100 x0.1 ms" <<< "$out" || fail "knobs not read: $out"
+nbmon cmd wl 10fff0 0 0 0 0 || fail "knobs"
 clean_run 6480000a "EHCI" " W 0 F 0$irqs" 10 "[0-9a-f]*"
 out=$(nbmon call 100000 a0800003) || fail "unlink self-test call: $(tail -n 4 "$vm/nbmon.log")"
-grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 +0.0 ms$" <<< "$out" \
-  && grep -Eq "^  F slot [0-9]+\+18 f4e[0-9a-f]{5} -> f4e[0-9a-f]{5} x1$" <<< "$out" \
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 late$" <<< "$out" \
+  && grep -Eq "^  F slot [0-9]+\+18 f4e[0-9a-f]{5} -> f4e[0-9a-f]{5} x1 at watch of slot [0-9]+$" <<< "$out" \
   && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "unlink self-test: write into a freed slot not reported: $out"
 vm_stop

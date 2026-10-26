@@ -27,8 +27,10 @@
       interrupt with bit 30), then filled with a guard pattern at once; every freed slot is checked after each
       transfer and 5 ms after the last: "F n" and a line per changed place (slot, offset, old -> new, count);
       Knobs in RAM (wl before call): 0010FFF0 ms of delay after IAA before freeing (0-1000), 0010FFF4 IAA doorbells
-      (0: 1, up to 16), 0010FFF8 nonzero: wait until ASYNCLISTADDR (the HC's current QH) is off the slot. Each freed
-      slot is polled every 0.1 ms for 10 ms: "+t ms" after IAA of the first change ("late": found later);
+      (0: 1, up to 16), 0010FFF8 nonzero: wait until ASYNCLISTADDR (the HC's current QH) is off the slot, 0010FFFC
+      the freed slot polled every 0.1 ms for that many 0.1 ms ("+t ms" after IAA of the first change; "late": found
+      later; FFFFFFFF: 10 ms). Freed slots are also checked while the next transfer runs, a change noted with what
+      ran then (unlink, watch, between transfers, the active qTD's stage of the slot in use, end);
    16-22 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
 #include "nbmon_api.h"
 
@@ -80,11 +82,12 @@ static const struct nbmon_api *Api;
 static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
 static int Shared, GuardInject, Write, Wbinvd, Overrun, OverrunInject, NOverruns, Unlink, FreedInject, CurSlot;
 static int Freed[NSLOTS];
-static uint32_t KnobDelay, KnobCycles, KnobAsync, FirstStray = ~0u;
+static uint32_t KnobDelay, KnobCycles, KnobAsync, KnobWatch, FirstStray = ~0u;
 static volatile int IaaSeen;
 static const char *StageName, *Label[16];
 static uint32_t OverrunChanged, FreedChanged;
-static struct overrun { const char *where; int slot; uint32_t offset, old, now, count; } Overruns[16];
+static struct overrun { const char *where; int slot, during; uint32_t offset, old, now, count; } Overruns[16];
+static const char *Phase;   /* bit 23: what runs while freed slots are checked (0: the transfer's active qTD) */
 static uint32_t LbaW;
 static uint16_t UhciIo[2], Io, PortReg;
 static uint32_t EhciOp, EhciPort, Tag, ChecksumRef;
@@ -512,10 +515,11 @@ note_change(const char *where, int slot, uint32_t off, uint32_t old, uint32_t no
         OverrunChanged++;
     else
         FreedChanged++;
-    while (i < NOverruns && (Overruns[i].where != where || Overruns[i].slot != slot || Overruns[i].offset != off))
+    while (i < NOverruns && (Overruns[i].where != where || Overruns[i].slot != slot || Overruns[i].offset != off
+                             || Overruns[i].during != CurSlot))
         i++;
     if (i == NOverruns && NOverruns < 16)
-        Overruns[NOverruns++] = (struct overrun){ where, slot, off, old, now, 0 };
+        Overruns[NOverruns++] = (struct overrun){ where, slot, CurSlot, off, old, now, 0 };
     if (i < 16)
         Overruns[i].count++;
 }
@@ -547,7 +551,8 @@ overrun_guards(int check)
         overrun_range((uint32_t)qtd_at(i), 32, 128, Label[i], check);
 }
 
-/* A freed slot (bit 23) filled with its guard pattern, or checked */
+/* A freed slot (bit 23) filled with its guard pattern, or checked: a change is noted with what was running then
+   (Phase, else the first active qTD of the transfer in CurSlot) */
 static void
 freed_slot(int slot, int check)
 {
@@ -555,15 +560,21 @@ freed_slot(int slot, int check)
         uint32_t old = 0xf4e00000 | slot << 12 | off, now = *mmio(SLOT(slot) + off);
         if (!check)
             *mmio(SLOT(slot) + off) = old;
-        else if (now != old)
-            note_change("", slot, off, old, now), *mmio(SLOT(slot) + off) = old;   /* each write counted once */
+        else if (now != old) {
+            const char *where = Phase;
+            for (int i = 0; !where && i < NTd; i++)
+                if (qtd_at(i)->token & Q_ACTIVE)
+                    where = Label[i];
+            note_change(where ? where : "transfer done", slot, off, old, now);
+            *mmio(SLOT(slot) + off) = old;   /* each write counted once */
+        }
     }
 }
 
 static void
 freed_check(void)
 {
-    for (int slot = 0; slot < NSLOTS; slot++)
+    for (int slot = 0; Unlink && slot < NSLOTS; slot++)
         if (Freed[slot])
             freed_slot(slot, 1);
 }
@@ -588,6 +599,12 @@ overrun_report(uint32_t *freed)
         put_hex(Overruns[i].now, 8);
         put_str(" x");
         put_dec(Overruns[i].count);
+        if (Overruns[i].slot >= 0) {
+            put_str(" at ");
+            put_str(Overruns[i].where);
+            put_str(" of slot ");
+            put_dec(Overruns[i].during);
+        }
         put_str("\r\n");
     }
     NOverruns = OverrunChanged = FreedChanged = 0;
@@ -682,6 +699,7 @@ static void
 idle(void)
 {
     guards(0);
+    freed_check();
     if (Irq)
         __asm__ volatile("hlt");
 }
@@ -697,6 +715,7 @@ queue_start(void)
     overrun_guards(0);
     if (!Unlink)
         return ehci_async(1);
+    Phase = 0;
     HEAD_QH[0] = (uint32_t)EQH(0) | 2;   /* linked into the running schedule */
     return 0;
 }
@@ -718,14 +737,12 @@ slot_intact(int slot)
     return 1;
 }
 
-/* The freed slot watched for 10 ms (PIT channel 0 polled): the 0.1 ms after IAA of its first change, if earlier */
+/* The freed slot watched for KnobWatch * 0.1 ms (PIT channel 0 polled): the 0.1 ms after IAA of its first change */
 static void
 watch_slot(uint32_t since_iaa_ms)
 {
     uint32_t period = IrqActive ? 1193 : 65536, last = pit_count(), ticks = 0, next = 0;
-    if (FreedInject)
-        *mmio(SLOT(CurSlot) + 0x18) ^= 0x10000, FreedInject = 0;
-    while (ticks < 11932) {
+    while (ticks < KnobWatch * 1193 / 10) {
         uint32_t now = pit_count();
         ticks += (last - now + period) % period, last = now;
         if (ticks < next)
@@ -761,6 +778,7 @@ static int
 ehci_unlink(void)
 {
     HEAD_QH[0] = (uint32_t)HEAD_QH | 2;
+    Phase = "unlink";
     for (uint32_t i = 0; i < KnobCycles; i++)
         if (wait_iaa())
             return -1;
@@ -770,8 +788,12 @@ ehci_unlink(void)
     delay_ms(KnobDelay);
     freed_slot(CurSlot, 0);
     Freed[CurSlot] = 1;
+    if (FreedInject)
+        *mmio(SLOT(CurSlot) + 0x18) ^= 0x10000, FreedInject = 0;
+    Phase = "watch";
     watch_slot(KnobDelay);
     freed_check();
+    Phase = "between transfers";
     return 0;
 }
 
@@ -843,12 +865,14 @@ control(int type, int request, int value, int len)
     int in = type & 0x80, toggle = 0;
     s[0] = type, s[1] = request, s[2] = value, s[3] = value >> 8, s[4] = s[5] = 0, s[6] = len, s[7] = len >> 8;
     queue_reset();
-    StageName = "qTD control";
+    StageName = "qTD setup";
     stage(PID_SETUP, 0, &toggle, SETUP, 8);
     toggle = 1;
+    StageName = "qTD control data";
     if (len)
         stage(in ? PID_IN : PID_OUT, 0, &toggle, CTL, len);
     toggle = 1;
+    StageName = "qTD status";
     stage(in && len ? PID_OUT : PID_IN, 0, &toggle, 0, 0);
     return queue_start() || queue_wait(500);
 }
@@ -1201,7 +1225,7 @@ fill_b(uint32_t seed)
 {
     for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            fill(c, c + CHUNK, seed), guards(0);
+            fill(c, c + CHUNK, seed), guards(0), freed_check();
 }
 
 static void
@@ -1209,7 +1233,7 @@ compare_b(uint32_t seed, struct diff *d)
 {
     for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            compare("B", c, c + CHUNK, 0, seed, d), guards(0);
+            compare("B", c, c + CHUNK, 0, seed, d), guards(0), freed_check();
 }
 
 /* Self-test: one IRQ0 sees a word of the checksummed region changed */
@@ -1377,7 +1401,8 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     }
     put_str(Overrun ? ", qTD/QH overrun guards" : "");
     FirstStray = ~0u;
-    KnobDelay = *mmio(0x10fff0), KnobCycles = *mmio(0x10fff4), KnobAsync = *mmio(0x10fff8);
+    KnobDelay = *mmio(0x10fff0), KnobCycles = *mmio(0x10fff4), KnobAsync = *mmio(0x10fff8), KnobWatch = *mmio(0x10fffc);
+    KnobWatch = KnobWatch > 10000 ? 100 : KnobWatch;
     KnobDelay = KnobDelay > 1000 ? 1000 : KnobDelay, KnobCycles = KnobCycles - 1 > 15 ? 1 : KnobCycles;
     if (Unlink) {
         put_str(", Linux-style unlink: IAA x");
@@ -1385,7 +1410,9 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
         put_str(KnobAsync ? ", ASYNCLISTADDR off the slot" : "");
         put_str(", then ");
         put_dec(KnobDelay);
-        put_str(" ms");
+        put_str(" ms, watch ");
+        put_dec(KnobWatch);
+        put_str(" x0.1 ms");
     }
     put_str(", schedule ");
     put_hex(Dma, 8);
@@ -1403,7 +1430,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     else if (!setup_controllers() && (!Irq || !irq_start())) {
         errors = setup_stick() ? ~0u : run_test(arg & 0xffff, arg >> 31, arg >> 28 & 1);
         if (Unlink)
-            delay_ms(5), freed_check();   /* late writes into the freed slots */
+            Phase = "end", delay_ms(5), freed_check();   /* late writes into the freed slots */
     }
     irq_off();
     teardown();
