@@ -31,6 +31,9 @@
       the freed slot polled every 0.1 ms for that many 0.1 ms ("+t ms" after IAA of the first change; "late": found
       later; FFFFFFFF: 10 ms). Freed slots are also checked while the next transfer runs, a change noted with what
       ran then (unlink, watch, between transfers, the active qTD's stage of the slot in use, end);
+      0010FFEC (with bit 29): bit 0, 1: UHCI function 0, 1 runs Linux's empty skeleton beside the EHCI (4 KB frame
+      list, 11 QHs, inactive TDs, RS, MAXP, its interrupts), checked during and after each transfer: unchanged, no
+      HSE, process error or halt, the frame number advancing ("U n", lines "U fn ...");
       0010FFE8: the IAA timeout in ms (0: 20, up to 1000). The IAA latency (doorbell to USBSTS IAA, PIT polled,
       no hlt) ends the run: min/avg/max, a histogram, the waits over 10 ms;
    22 no B: the CPU leaves B alone (an idle CPU during the transfers);
@@ -93,7 +96,10 @@ static int Freed[NSLOTS];
 static uint32_t KnobDelay, KnobCycles, KnobAsync, KnobWatch, KnobIaaTimeout, FirstStray = ~0u;
 static struct iaa { uint32_t waits, min, max, sum, hist[8]; } Iaa[2];   /* transfer, busy unlinks: PIT ticks; bins
                                                                        <0.125 <1 <2 <5 <10 <20 >=20 ms, never */
-static int NoB, Busy, Ring[4], NRing, DNext, DFreed[NSLOTS], BusyData;
+static int NoB, Busy, Ring[4], NRing, DNext, DFreed[NSLOTS], BusyData, Bg;
+static uint32_t BgChanged, BgFrnum[2];
+static int BgInject;
+static volatile uint16_t BgSts[2];
 static volatile int IaaSeen;
 static const char *StageName, *Label[16];
 static uint32_t OverrunChanged, FreedChanged;
@@ -269,6 +275,12 @@ usb_ack(void)
         *ereg(E_STS) = sts;
     else
         outw(Io + 2, inw(Io + 2) & 0x1f);
+    for (int fn = 0; fn < 2; fn++)
+        if (Bg >> fn & 1) {
+            uint16_t bg = inw(UhciIo[fn] + 2) & 0x1f;
+            BgSts[fn] |= bg;   /* for bg_check */
+            outw(UhciIo[fn] + 2, bg);
+        }
 }
 
 __attribute__((used, regparm(0))) void
@@ -529,8 +541,10 @@ static void
 note_change(const char *where, int slot, uint32_t off, uint32_t old, uint32_t now)
 {
     int i = 0;
-    if (slot < 0)
+    if (slot == -1)
         OverrunChanged++;
+    else if (slot < 0)
+        BgChanged++;
     else
         FreedChanged++;
     while (i < NOverruns && (Overruns[i].where != where || Overruns[i].slot != slot || Overruns[i].offset != off
@@ -613,20 +627,26 @@ freed_check(void)
     }
 }
 
-/* The changed guards since the last report, one line per place; returns the overruns, *freed the others */
+/* The changes since the last report, one line per place: overruns (slot -1, returned), background UHCIs (slot -2 -
+   fn, *bg), freed slots (*freed) */
 static uint32_t
-overrun_report(uint32_t *freed)
+overrun_report(uint32_t *freed, uint32_t *bg)
 {
     uint32_t changed = OverrunChanged;
-    *freed = FreedChanged;
+    *freed = FreedChanged, *bg = BgChanged;
     for (int i = 0; i < NOverruns; i++) {
-        put_str(Overruns[i].slot < 0 ? "  O " : Overruns[i].slot < NSLOTS ? "  F slot " : "  F dummy ");
+        put_str(Overruns[i].slot == -1 ? "  O " : Overruns[i].slot < 0 ? "  U fn" : Overruns[i].slot < NSLOTS
+                ? "  F slot " : "  F dummy ");
+        if (Overruns[i].slot < -1) {
+            put_dec(-2 - Overruns[i].slot);
+            put_str(" ");
+        }
         if (Overruns[i].slot < 0)
             put_str(Overruns[i].where);
         else
             put_dec(Overruns[i].slot % NSLOTS);
         put_str("+");
-        put_hex(Overruns[i].offset, 2);
+        put_hex(Overruns[i].offset, Overruns[i].offset > 0xff ? 4 : 2);
         put_str(" ");
         put_hex(Overruns[i].old, 8);
         put_str(" -> ");
@@ -641,7 +661,7 @@ overrun_report(uint32_t *freed)
         }
         put_str("\r\n");
     }
-    NOverruns = OverrunChanged = FreedChanged = 0;
+    NOverruns = OverrunChanged = FreedChanged = BgChanged = 0;
     return changed;
 }
 
@@ -729,11 +749,100 @@ ehci_async(int on)
     return wait_ereg(E_STS, E_ASS, on ? E_ASS : 0);
 }
 
+/****************************************************************
+ * Background UHCIs (knob 0010FFEC, with bit 29): Linux's empty skeleton running beside the EHCI
+ ****************************************************************/
+
+#define BG_FRAMES(fn) (RAM_DMA + 0x6000 + 0x1000 * (fn))
+#define BG_SKEL(fn)   (RAM_DMA + 0x8000 + 0x400 * (fn))   /* 11 QHs 16 bytes apart, then 8 TDs from 100h */
+
+/* The value Linux 3.16 puts at off: frame list entries (0-FFFh) to the interrupt skeleton QHs by ffs(frame), QHs 2-8
+   (int128-int2) linked to 9 (async, its link T), 10 the terminating QH linked to itself; 9 and 10 hold the
+   inactive terminating TD (address 7Fh, IN), the interrupt QHs one inactive TD each */
+static uint32_t
+bg_value(int fn, uint32_t off)
+{
+    uint32_t skel = BG_SKEL(fn), td = skel + 0x100;
+    if (off < 0x1000) {
+        int frame = off / 4, skelnum = 8 - __builtin_ctz(frame | 1024);
+        return (skel + 16 * (skelnum <= 1 ? 9 : skelnum)) | 2;
+    }
+    off -= 0x1000;
+    if (off < 0x100) {
+        int qh = off / 16, td_of_qh = qh >= 9 ? 0 : qh >= 2 ? qh - 1 : -1;
+        if (off % 16 >= 8)
+            return 0;
+        if (off % 16 == 0)
+            return qh >= 2 && qh <= 8 ? (skel + 16 * 9) | 2 : qh == 10 ? (skel + 16 * 10) | 2 : 1;
+        return td_of_qh < 0 ? 1 : td + 16 * td_of_qh;
+    }
+    switch (off % 16) {
+    case 0: return 1;
+    case 8: return 0x7ffu << 21 | 0x7f << 8 | PID_IN;
+    default: return 0;
+    }
+}
+
+/* Write the skeleton, or check it: a changed dword is noted and restored */
+static void
+bg_skeleton(int fn, int check)
+{
+    for (uint32_t off = 0; off < 0x1000 + 0x180; off += 4) {
+        uint32_t addr = off < 0x1000 ? BG_FRAMES(fn) + off : BG_SKEL(fn) + off - 0x1000, want = bg_value(fn, off);
+        if (check && *mmio(addr) != want)
+            note_change("mem", -2 - fn, off, want, *mmio(addr));
+        if (!check || *mmio(addr) != want)
+            *mmio(addr) = want;
+    }
+}
+
+static void
+bg_start(void)
+{
+    for (int fn = 0; fn < 2; fn++)
+        if (Bg >> fn & 1) {
+            uint16_t io = UhciIo[fn];
+            bg_skeleton(fn, 0);
+            outl(io + 8, BG_FRAMES(fn));
+            outw(io + 6, 0);
+            outb(io + 0xc, 0x40);
+            outw(io + 4, Irq ? 0x0f : 0);
+            outw(io + 2, 0x3f);
+            outw(io, CMD_RS | CMD_CF | CMD_MAXP);
+            BgFrnum[fn] = 0;
+            put_str("usbdma: background UHCI function ");
+            put_dec(fn);
+            put_str(", IRQ ");
+            put_dec(pci_read(CardDev, fn, 0x3c) & 0xff);
+            put_str("\r\n");
+        }
+}
+
+/* The skeleton unchanged, no HSE, process error or halt; after a transfer also the frame number advanced */
+static void
+bg_check(int after)
+{
+    for (int fn = 0; fn < 2; fn++)
+        if (Bg >> fn & 1) {
+            uint16_t io = UhciIo[fn], sts = inw(io + 2) | BgSts[fn], frnum = inw(io + 6) & 0x3ff;
+            BgSts[fn] = 0;
+            if (BgInject && after)
+                *mmio(BG_FRAMES(fn) + 0x10) ^= 0x10000, BgInject = 0;
+            bg_skeleton(fn, 1);
+            if (sts & 0x38)
+                note_change("USBSTS", -2 - fn, 0, 0, sts), outw(io + 2, sts & 0x18);
+            if (after && frnum == BgFrnum[fn])
+                note_change("FRNUM stuck", -2 - fn, 0, frnum, frnum);
+            BgFrnum[fn] = after ? frnum : BgFrnum[fn];
+        }
+}
+
 static void
 idle(void)
 {
     guards(0);
     freed_check();
+    bg_check(0);
     if (Irq)
         __asm__ volatile("hlt");
 }
@@ -993,6 +1102,7 @@ queue_wait(uint32_t timeout_ms)
         guards(1);
     if (!Ehci)
         return r;
+    bg_check(1);
     if (Unlink) {
         ToggleOut = EQH(1)[6] >> 31, ToggleIn = EQH(2)[6] >> 31;
         if (ehci_unlink())
@@ -1237,6 +1347,7 @@ setup_controllers(void)
     delay_ms(100);
     if (Ehci ? ehci_setup() : uhci_setup())
         return -1;
+    bg_start();
     UsbIrq = pci_read(CardDev, UsbFn, 0x3c) & 0xff;
     if (!Irq)
         return 0;
@@ -1380,7 +1491,7 @@ fill_b(uint32_t seed)
 {
     for (uint32_t c = FREE_LO; !NoB && c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            fill(c, c + CHUNK, seed), guards(0), freed_check();
+            fill(c, c + CHUNK, seed), guards(0), freed_check(), bg_check(0);
 }
 
 static void
@@ -1388,7 +1499,7 @@ compare_b(uint32_t seed, struct diff *d)
 {
     for (uint32_t c = FREE_LO; !NoB && c < FREE_HI; c += CHUNK)
         if (in_b(c))
-            compare("B", c, c + CHUNK, 0, seed, d), guards(0), freed_check();
+            compare("B", c, c + CHUNK, 0, seed, d), guards(0), freed_check(), bg_check(0);
 }
 
 /* Self-test: one IRQ0 sees a word of the checksummed region changed */
@@ -1455,7 +1566,7 @@ run_test(uint32_t iterations, int inject, int slots)
         uint32_t off = Shared ? 0x24 : 0, a_buf = RamA + off, pattern = 0xdeadbeef ^ it * 0x9e3779b9u;
         Buf = a_buf;
         a.n = b.n = w.n = 0;
-        GuardInject = OverrunInject = FreedInject = inject && it == 1;
+        GuardInject = OverrunInject = FreedInject = BgInject = inject && it == 1;
         fill(RamA, RamA + READ_LEN, pattern);   /* a read must replace it; a write sends it, Modified in L1 */
         if (Wbinvd)
             __asm__ volatile("wbinvd" : : : "memory");
@@ -1486,8 +1597,8 @@ run_test(uint32_t iterations, int inject, int slots)
         if (!Write)
             compare("A", Buf, Buf + Len, Ref, 0, &a);
         int bad = Write ? a.n || w.n : crc != ref;
-        uint32_t freed, overruns = overrun_report(&freed);   /* the first one has those of the setup */
-        errors += a.n + b.n + w.n + (!Write && !a.n && bad) + Guard.n + overruns + freed;
+        uint32_t freed, bg, overruns = overrun_report(&freed, &bg);   /* the first one has those of the setup */
+        errors += a.n + b.n + w.n + (!Write && !a.n && bad) + Guard.n + overruns + freed + bg;
         put_str("it ");
         put_dec(it + 1);
         put_str(" crc ");
@@ -1502,6 +1613,10 @@ run_test(uint32_t iterations, int inject, int slots)
         if (Overrun) {
             put_str(" O ");
             put_dec(overruns);
+        }
+        if (Bg) {
+            put_str(" U ");
+            put_dec(bg);
         }
         if (Unlink) {
             put_str(" F ");
@@ -1563,6 +1678,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     FirstStray = ~0u;
     KnobDelay = *mmio(0x10fff0), KnobCycles = *mmio(0x10fff4), KnobAsync = *mmio(0x10fff8), KnobWatch = *mmio(0x10fffc);
     KnobWatch = KnobWatch > 10000 ? 100 : KnobWatch;
+    Bg = Ehci ? *mmio(0x10ffec) & 3 : 0, BgChanged = 0;
     KnobIaaTimeout = *mmio(0x10ffe8), KnobIaaTimeout = KnobIaaTimeout - 1 >= 1000 ? 20 : KnobIaaTimeout;
     KnobDelay = KnobDelay > 1000 ? 1000 : KnobDelay, KnobCycles = KnobCycles - 1 > 15 ? 1 : KnobCycles;
     if (Unlink) {
@@ -1597,9 +1713,9 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     }
     irq_off();
     teardown();
-    uint32_t freed, overruns = overrun_report(&freed);   /* those of a failed transfer, and late ones */
+    uint32_t freed, bg, overruns = overrun_report(&freed, &bg);   /* those of a failed transfer, and late ones */
     if (errors != ~0u)
-        errors += overruns + freed;
+        errors += overruns + freed + bg;
     if (Unlink)
         put_iaa_stats(0);
     if (Busy)

@@ -9,7 +9,8 @@
 # overrun guards (bit 24) unchanged on reads and on writes with interrupts, its self-test changing one; the same
 # with Linux-style unlink (bit 23: no write into the freed QH/qTD slots, the IAA latency statistics; also with its
 # knobs in RAM, and without B: bit 22), its self-test writing into one; unlinking dummy QHs while busy (bit 20), its
-# self-test writing into a freed dummy.
+# self-test writing into a freed dummy; both UHCIs running Linux's empty skeleton beside the EHCI (knob 0010FFEC),
+# its self-test changing their frame list.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -95,4 +96,13 @@ out=$(nbmon call 100000 a0900003) || fail "busy unlink self-test call: $(tail -n
 grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 late$" <<< "$out" \
   && grep -Eq "^  F dummy [0-9]+\+18 d4e[0-9a-f]{5} -> d4e[0-9a-f]{5} x1 at .* of slot [0-9]+$" <<< "$out" \
   && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "busy unlink self-test: write into a freed dummy not reported: $out"
+nbmon cmd wl 10ffe8 0 3 0 0 0 0 || fail "knobs"
+clean_run 2000000a "EHCI" " U 0" 10
+grep -q "^usbdma: background UHCI function 1, IRQ" <<< "$out" || fail "no background UHCIs: $out"
+clean_run 6480000a "EHCI" " W 0 U 0 F 0$irqs" 10 "[0-9a-f]*"
+out=$(nbmon call 100000 a0000003) || fail "background UHCI self-test call: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 U 1$" <<< "$out" \
+  && grep -q "^  U fn0 mem+10 [0-9a-f]* -> [0-9a-f]* x1$" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
+  || fail "background UHCI self-test: frame list change not reported: $out"
+nbmon cmd wl 10ffe8 0 0 0 0 0 0 || fail "knobs"
 vm_stop
