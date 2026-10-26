@@ -3,12 +3,13 @@
 # with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
 # its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
 # IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
-# error), on the EHCI at high speed (bit 29), and both; with A at 00300000 (bits 16-21), in 16 slots (bit 28), and
+# error), on the EHCI at high speed (bit 29), and both; with A at 00300000 (bits 16-19), in 16 slots (bit 28), and
 # with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault); the same
 # with write+readback (bit 26, also with wbinvd: bit 25), its self-test flipping a byte of the read back; EHCI qTD/QH
 # overrun guards (bit 24) unchanged on reads and on writes with interrupts, its self-test changing one; the same
 # with Linux-style unlink (bit 23: no write into the freed QH/qTD slots, the IAA latency statistics; also with its
-# knobs in RAM, and without B: bit 22), its self-test writing into one.
+# knobs in RAM, and without B: bit 22), its self-test writing into one; unlinking dummy QHs while busy (bit 20), its
+# self-test writing into a freed dummy.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -49,7 +50,7 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
 clean_run 40000014 "UHCI" "$irqs"
 clean_run 20000014 "EHCI" ""
 clean_run 60000014 "EHCI" "$irqs"
-clean_run 00300014 "UHCI" ""
+clean_run 00060014 "UHCI" ""
 clean_run 70000014 "EHCI" " slot [0-9a-f]*$irqs"
 [ "$(grep -o " slot [0-9a-f]*" <<< "$out" | sort -u | wc -l)" = 16 ] || fail "arg 70000014: not 16 A slots: $out"
 crc127=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65024)))' "$vm_dir/usb.img")
@@ -86,4 +87,12 @@ out=$(nbmon call 100000 a0800003) || fail "unlink self-test call: $(tail -n 4 "$
 grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 late$" <<< "$out" \
   && grep -Eq "^  F slot [0-9]+\+18 f4e[0-9a-f]{5} -> f4e[0-9a-f]{5} x1 at watch of slot [0-9]+$" <<< "$out" \
   && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "unlink self-test: write into a freed slot not reported: $out"
+clean_run 2090000a "EHCI" " F 0" 10
+grep -Eq "^usbdma: IAA busy 10 waits, min .*, never 0; over 10 ms 0; data stage active at [0-9]+$" <<< "$out" \
+  || fail "no busy IAA statistics: $out"
+clean_run 6490000a "EHCI" " W 0 F 0$irqs" 10 "[0-9a-f]*"
+out=$(nbmon call 100000 a0900003) || fail "busy unlink self-test call: $(tail -n 4 "$vm/nbmon.log")"
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 late$" <<< "$out" \
+  && grep -Eq "^  F dummy [0-9]+\+18 d4e[0-9a-f]{5} -> d4e[0-9a-f]{5} x1 at .* of slot [0-9]+$" <<< "$out" \
+  && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "busy unlink self-test: write into a freed dummy not reported: $out"
 vm_stop

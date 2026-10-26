@@ -15,7 +15,7 @@
       the CPU keeps rewriting the rest of those lines (guards: around the read, after each TD and the UHCI QH, the
       EHCI QHs' spare dwords 12-15, after the CSW) with a counter, before each start, while it waits and between
       the 64 KB parts of B; after each transfer the guards must hold the last value (G: the mismatches);
-   26 write+readback: the CPU fills A with a new pattern, WRITE(10) to LBA_W = 37800h + bits 16-21 * 80h (in the
+   26 write+readback: the CPU fills A with a new pattern, WRITE(10) to LBA_W = 37800h + n * 80h (in the
       stick's swap partition; A stays at 00120000), READ(10) back into the poisoned first-read area (A2), compared
       with A (W: the mismatches, @ the offset); A must still hold the pattern;
    25 wbinvd after the CPU fill, before the transfer;
@@ -34,7 +34,11 @@
       0010FFE8: the IAA timeout in ms (0: 20, up to 1000). The IAA latency (doorbell to USBSTS IAA, PIT polled,
       no hlt) ends the run: min/avg/max, a histogram, the waits over 10 ms;
    22 no B: the CPU leaves B alone (an idle CPU during the transfers);
-   16-21 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
+   20 unlink while busy (with bit 23): 4 empty dummy QHs follow the transfer's QHs in the ring; during each
+      READ/WRITE, once its CBW is out, the first dummy is unlinked (the bulk-in QH before it skips it), IAA awaited
+      ("IAA busy" statistics, with how often the data stage was still active), the dummy poisoned at once and watched
+      ("F dummy"); a fresh one of 16 is linked at the end after the transfer;
+   16-19 n: A's base n * 512 KB (3-14; 0: 00120000); with bit 26, LBA_W. */
 #include "nbmon_api.h"
 
 #define VT6212_EHCI 0x31041106u   /* function 2; the UHCIs are functions 0 and 1 */
@@ -62,6 +66,7 @@
 #define SLOT(n)     (RAM_DMA + 0xa000 + 0x200 * (n))   /* bit 23: 3 QHs, then the qTDs from C0h */
 #define HEAD_QH     ((volatile uint32_t *)(RAM_DMA + 0xc000))
 #define NSLOTS      16
+#define DSLOT(n)    ((volatile uint32_t *)(RAM_DMA + 0xc400 + 0x40 * (n)))   /* bit 20: 16 dummy QHs */
 #define CHECKED     (RAM_DMA + 0xe000)                                       /* 4 KB, summed by IRQ0 */
 #define IDT         ((volatile uint32_t *)(RAM_DMA + 0xf000))
 
@@ -86,8 +91,9 @@ static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
 static int Shared, GuardInject, Write, Wbinvd, Overrun, OverrunInject, NOverruns, Unlink, FreedInject, CurSlot;
 static int Freed[NSLOTS];
 static uint32_t KnobDelay, KnobCycles, KnobAsync, KnobWatch, KnobIaaTimeout, FirstStray = ~0u;
-static uint32_t IaaWaits, IaaMin, IaaMax, IaaSum, IaaHist[8];   /* PIT ticks; bins <0.125 <1 <2 <5 <10 <20 >=20 ms, never */
-static int NoB;
+static struct iaa { uint32_t waits, min, max, sum, hist[8]; } Iaa[2];   /* transfer, busy unlinks: PIT ticks; bins
+                                                                       <0.125 <1 <2 <5 <10 <20 >=20 ms, never */
+static int NoB, Busy, Ring[4], NRing, DNext, DFreed[NSLOTS], BusyData;
 static volatile int IaaSeen;
 static const char *StageName, *Label[16];
 static uint32_t OverrunChanged, FreedChanged;
@@ -448,6 +454,13 @@ td_at(int i)
     return (volatile struct td *)(RAM_DMA + 0x2000 + i * (Shared ? 32 : 16));
 }
 
+/* What follows the transfer's QHs in the ring (bit 23): the first dummy (bit 20), else the head */
+static uint32_t
+after_qhs(void)
+{
+    return (NRing ? (uint32_t)DSLOT(Ring[0]) : (uint32_t)HEAD_QH) | 2;
+}
+
 static volatile struct qtd *
 qtd_at(int i)
 {
@@ -556,22 +569,35 @@ overrun_guards(int check)
         overrun_range((uint32_t)qtd_at(i), 32, 128, Label[i], check);
 }
 
+/* Freed memory: transfer slots 0-15 (512 bytes), dummy QHs 16-31 (64 bytes), each with its own guard pattern */
+static uint32_t
+slot_base(int slot)
+{
+    return slot < NSLOTS ? SLOT(slot) : (uint32_t)DSLOT(slot - NSLOTS);
+}
+
+static uint32_t
+slot_pattern(int slot, uint32_t off)
+{
+    return (slot < NSLOTS ? 0xf4e00000 : 0xd4e00000) | (slot % NSLOTS) << 12 | off;
+}
+
 /* A freed slot (bit 23) filled with its guard pattern, or checked: a change is noted with what was running then
    (Phase, else the first active qTD of the transfer in CurSlot) */
 static void
 freed_slot(int slot, int check)
 {
-    for (uint32_t off = 0; off < 0x200; off += 4) {
-        uint32_t old = 0xf4e00000 | slot << 12 | off, now = *mmio(SLOT(slot) + off);
+    for (uint32_t off = 0; off < (slot < NSLOTS ? 0x200u : 0x40u); off += 4) {
+        uint32_t old = slot_pattern(slot, off), now = *mmio(slot_base(slot) + off);
         if (!check)
-            *mmio(SLOT(slot) + off) = old;
+            *mmio(slot_base(slot) + off) = old;
         else if (now != old) {
             const char *where = Phase;
             for (int i = 0; !where && i < NTd; i++)
                 if (qtd_at(i)->token & Q_ACTIVE)
                     where = Label[i];
             note_change(where ? where : "transfer done", slot, off, old, now);
-            *mmio(SLOT(slot) + off) = old;   /* each write counted once */
+            *mmio(slot_base(slot) + off) = old;   /* each write counted once */
         }
     }
 }
@@ -579,9 +605,12 @@ freed_slot(int slot, int check)
 static void
 freed_check(void)
 {
-    for (int slot = 0; Unlink && slot < NSLOTS; slot++)
+    for (int slot = 0; Unlink && slot < NSLOTS; slot++) {
         if (Freed[slot])
             freed_slot(slot, 1);
+        if (DFreed[slot])
+            freed_slot(NSLOTS + slot, 1);
+    }
 }
 
 /* The changed guards since the last report, one line per place; returns the overruns, *freed the others */
@@ -591,11 +620,11 @@ overrun_report(uint32_t *freed)
     uint32_t changed = OverrunChanged;
     *freed = FreedChanged;
     for (int i = 0; i < NOverruns; i++) {
-        put_str(Overruns[i].slot < 0 ? "  O " : "  F slot ");
+        put_str(Overruns[i].slot < 0 ? "  O " : Overruns[i].slot < NSLOTS ? "  F slot " : "  F dummy ");
         if (Overruns[i].slot < 0)
             put_str(Overruns[i].where);
         else
-            put_dec(Overruns[i].slot);
+            put_dec(Overruns[i].slot % NSLOTS);
         put_str("+");
         put_hex(Overruns[i].offset, 2);
         put_str(" ");
@@ -682,7 +711,7 @@ ehci_qh_init(int q)
 {
     volatile uint32_t *qh = EQH(q);
     int ep = q == 0 ? 0 : q == 1 ? EpOut : EpIn;
-    qh[0] = (Unlink && q == 2 ? (uint32_t)HEAD_QH : (uint32_t)EQH((q + 1) % 3)) | 2;
+    qh[0] = Unlink && q == 2 ? after_qhs() : (uint32_t)EQH((q + 1) % 3) | 2;
     qh[1] = (q ? 0 : (Unlink ? 0 : 1u << 15) | 1u << 14) | (uint32_t)(q ? MpsBulk : Mps0) << 16 | 2 << 12 | ep << 8 | Addr;
     qh[2] = 1u << 30;
     qh[3] = 0;
@@ -737,7 +766,7 @@ static int
 slot_intact(int slot)
 {
     for (uint32_t off = 0; off < 0x200; off += 4)
-        if (*mmio(SLOT(slot) + off) != (0xf4e00000 | slot << 12 | off))
+        if (*mmio(SLOT(slot) + off) != slot_pattern(slot, off))
             return 0;
     return 1;
 }
@@ -763,8 +792,9 @@ watch_slot(uint32_t since_iaa_ms)
 
 /* The doorbell, then IAA polled (or its interrupt) with its latency measured on PIT channel 0, no hlt */
 static int
-wait_iaa(void)
+wait_iaa(int busy)
 {
+    struct iaa *st = &Iaa[busy];
     static const uint32_t bins[6] = { 149, 1193, 2386, 5966, 11932, 23864 };
     uint32_t period = IrqActive ? 1193 : 65536, last = pit_count(), ticks = 0;
     IaaSeen = 0;
@@ -775,17 +805,17 @@ wait_iaa(void)
         if (*ereg(E_STS) & E_IAA)
             *ereg(E_STS) = E_IAA, IaaSeen = 1;
         else if (ticks > KnobIaaTimeout * 1193) {
-            IaaHist[7]++;
+            st->hist[7]++;
             return fail("no IAA, USBSTS", *ereg(E_STS));
         }
     }
     int bin = 0;
     while (bin < 6 && ticks >= bins[bin])
         bin++;
-    IaaHist[bin]++;
-    IaaMin = !IaaWaits || ticks < IaaMin ? ticks : IaaMin;
-    IaaMax = ticks > IaaMax ? ticks : IaaMax;
-    IaaSum += ticks, IaaWaits++;
+    st->hist[bin]++;
+    st->min = !st->waits || ticks < st->min ? ticks : st->min;
+    st->max = ticks > st->max ? ticks : st->max;
+    st->sum += ticks, st->waits++;
     return 0;
 }
 
@@ -801,26 +831,92 @@ put_ms(const char *name, uint32_t ticks)
 }
 
 static void
-put_iaa_stats(void)
+put_iaa_stats(int busy)
 {
     static const char *const names[8] = { "; <0.125 ", ", <1 ", ", <2 ", ", <5 ", ", <10 ", ", <20 ", ", >=20 ",
                                           ", never " };
-    put_str("usbdma: IAA ");
-    put_dec(IaaWaits);
+    const struct iaa *st = &Iaa[busy];
+    put_str(busy ? "usbdma: IAA busy " : "usbdma: IAA ");
+    put_dec(st->waits);
     put_str(" waits");
-    if (IaaWaits) {
-        put_ms(", min ", IaaMin);
-        put_ms(" avg ", IaaSum / IaaWaits);
-        put_ms(" max ", IaaMax);
+    if (st->waits) {
+        put_ms(", min ", st->min);
+        put_ms(" avg ", st->sum / st->waits);
+        put_ms(" max ", st->max);
         put_str(" ms");
     }
     for (int i = 0; i < 8; i++) {
         put_str(names[i]);
-        put_dec(IaaHist[i]);
+        put_dec(st->hist[i]);
     }
     put_str("; over 10 ms ");
-    put_dec(IaaHist[5] + IaaHist[6] + IaaHist[7]);
+    put_dec(st->hist[5] + st->hist[6] + st->hist[7]);
+    if (busy) {
+        put_str("; data stage active at ");
+        put_dec(BusyData);
+    }
     put_str("\r\n");
+}
+
+/* Bit 20: empty dummy QHs in the ring after the transfer's QHs, as Linux's idle endpoints */
+static void
+dummy_init(int n)
+{
+    volatile uint32_t *qh = DSLOT(n);
+    for (int i = 0; i < 12; i++)
+        qh[i] = 0;
+    qh[0] = (uint32_t)HEAD_QH | 2;
+    qh[1] = 512u << 16 | 2 << 12 | 15 << 8 | Addr;
+    qh[2] = 1u << 30;
+    qh[4] = qh[5] = 1;
+}
+
+static int
+in_ring(int n)
+{
+    for (int i = 0; i < NRing; i++)
+        if (Ring[i] == n)
+            return 1;
+    return 0;
+}
+
+/* A fresh dummy at the end of the ring */
+static void
+dummy_relink(void)
+{
+    while (in_ring(DNext))
+        DNext = (DNext + 1) % NSLOTS;
+    int fresh = DNext;
+    DNext = (DNext + 1) % NSLOTS;
+    DFreed[fresh] = 0;
+    dummy_init(fresh);
+    if (NRing)
+        DSLOT(Ring[NRing - 1])[0] = (uint32_t)DSLOT(fresh) | 2;
+    else
+        HEAD_QH[0] = (uint32_t)DSLOT(fresh) | 2;
+    Ring[NRing++] = fresh;
+}
+
+/* During a READ/WRITE: once the CBW is out, the first dummy is unlinked (the bulk QH before it skips it), IAA
+   awaited, the dummy poisoned at once */
+static int
+busy_unlink(void)
+{
+    for (uint32_t start = now_ms(); (qtd_at(0)->token & Q_ACTIVE) && now_ms() - start < 5;)
+        ;
+    int victim = Ring[0];
+    BusyData += (qtd_at(1)->token & Q_ACTIVE) != 0;
+    EQH(2)[0] = NRing > 1 ? (uint32_t)DSLOT(Ring[1]) | 2 : (uint32_t)HEAD_QH | 2;
+    for (int i = 0; i + 1 < NRing; i++)
+        Ring[i] = Ring[i + 1];
+    NRing--;
+    if (wait_iaa(1))
+        return -1;
+    freed_slot(NSLOTS + victim, 0);
+    DFreed[victim] = 1;
+    if (FreedInject)
+        *mmio((uint32_t)DSLOT(victim) + 0x18) ^= 0x10000, FreedInject = 0;
+    return 0;
 }
 
 /* Bit 23, as Linux: the transfer's QHs out of the running ring, the IAA doorbell, then the slot is free memory. The
@@ -828,10 +924,10 @@ put_iaa_stats(void)
 static int
 ehci_unlink(void)
 {
-    HEAD_QH[0] = (uint32_t)HEAD_QH | 2;
+    HEAD_QH[0] = after_qhs();
     Phase = "unlink";
     for (uint32_t i = 0; i < KnobCycles; i++)
-        if (wait_iaa())
+        if (wait_iaa(0))
             return -1;
     for (uint32_t start = now_ms(); KnobAsync && (*ereg(E_ASYNC) & ~0x1ffu) == SLOT(CurSlot);)
         if (now_ms() - start > 20)
@@ -899,7 +995,11 @@ queue_wait(uint32_t timeout_ms)
         return r;
     if (Unlink) {
         ToggleOut = EQH(1)[6] >> 31, ToggleIn = EQH(2)[6] >> 31;
-        return ehci_unlink() ? -1 : r;
+        if (ehci_unlink())
+            return -1;
+        if (Busy && NRing < 4)
+            dummy_relink();
+        return r;
     }
     int stopped = ehci_async(0);
     overrun_guards(1);
@@ -1095,6 +1195,8 @@ ehci_setup(void)
     HEAD_QH[1] = 1u << 15 | 2 << 12;   /* H, high speed, no qTD: the reclamation head */
     HEAD_QH[4] = HEAD_QH[5] = 1;
     HEAD_QH[6] = Q_HALTED;
+    for (NRing = 0; Busy && NRing < 4;)
+        dummy_relink();
     *ereg(E_ASYNC) = Unlink ? (uint32_t)HEAD_QH : (uint32_t)EQH(0);
     *ereg(E_CMD) = 8 << 16 | E_RS;
     if (wait_ereg(E_STS, E_HALTED, 0) || (Unlink && ehci_async(1)))
@@ -1323,7 +1425,7 @@ transfer(int write, uint32_t lba, int fault, struct diff *b, uint32_t seed)
 {
     uint8_t cdb[10] = { write ? 0x2a : 0x28, 0, lba >> 24, lba >> 16 & 255, lba >> 8 & 255, lba & 255, 0, 0,
                         Len / 512, 0 };
-    int status = scsi_start(cdb, 10, Buf, Len) ? -1 : 0;
+    int status = scsi_start(cdb, 10, Buf, Len) || (Busy && NRing && busy_unlink()) ? -1 : 0;
     fill_b(seed);
     uint32_t bad = 0x463450;
     while (!in_b(bad))
@@ -1437,12 +1539,13 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     NOverruns = OverrunChanged = FreedChanged = CurSlot = 0;
     for (int slot = 0; slot < NSLOTS; slot++)
         Freed[slot] = 0;
-    NoB = arg >> 22 & 1;
-    LbaW = 0x37800 + (arg >> 16 & 0x3f) * 0x80;
-    Base = RamA = arg & 0x3f0000 && !Write ? arg & 0x3f0000 : 0x120000;
-    IaaWaits = IaaMin = IaaMax = IaaSum = 0;
-    for (int i = 0; i < 8; i++)
-        IaaHist[i] = 0;
+    NoB = arg >> 22 & 1, Busy = Unlink && arg >> 20 & 1;
+    LbaW = 0x37800 + (arg >> 16 & 15) * 0x80;
+    Base = RamA = arg & 0xf0000 && !Write ? (arg >> 16 & 15) * 0x80000 : 0x120000;
+    Iaa[0] = Iaa[1] = (struct iaa){ 0 };
+    NRing = DNext = BusyData = 0;
+    for (int slot = 0; slot < NSLOTS; slot++)
+        DFreed[slot] = 0;
     Dma = Base + CHUNK, Ref = Base + 2 * CHUNK;
     Buf = RamA + (Shared ? 0x24 : 0), Len = READ_LEN - (Shared ? 512 : 0);
     if (Base < FREE_LO || Ref + CHUNK > FREE_HI)
@@ -1463,7 +1566,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     KnobIaaTimeout = *mmio(0x10ffe8), KnobIaaTimeout = KnobIaaTimeout - 1 >= 1000 ? 20 : KnobIaaTimeout;
     KnobDelay = KnobDelay > 1000 ? 1000 : KnobDelay, KnobCycles = KnobCycles - 1 > 15 ? 1 : KnobCycles;
     if (Unlink) {
-        put_str(", Linux-style unlink: IAA x");
+        put_str(Busy ? ", Linux-style unlink, also while busy: IAA x" : ", Linux-style unlink: IAA x");
         put_dec(KnobCycles);
         put_str(KnobAsync ? ", ASYNCLISTADDR off the slot" : "");
         put_str(", then ");
@@ -1498,7 +1601,9 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     if (errors != ~0u)
         errors += overruns + freed;
     if (Unlink)
-        put_iaa_stats();
+        put_iaa_stats(0);
+    if (Busy)
+        put_iaa_stats(1);
     put_str("usbdma: errors ");
     put_dec(errors);
     put_str("\r\n");
