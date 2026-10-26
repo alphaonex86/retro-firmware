@@ -7,7 +7,8 @@
 # with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault); the same
 # with write+readback (bit 26, also with wbinvd: bit 25), its self-test flipping a byte of the read back; EHCI qTD/QH
 # overrun guards (bit 24) unchanged on reads and on writes with interrupts, its self-test changing one; the same
-# with Linux-style unlink (bit 23: no write into the freed QH/qTD slots), its self-test writing into one.
+# with Linux-style unlink (bit 23: no write into the freed QH/qTD slots; also with its knobs in RAM), its self-test
+# writing into one.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -23,8 +24,9 @@ range=$(nbmon --from-start wait 120) || fail "no monitor: $(tail -n 5 "$vm/nbmon
 [ "${range%-*}" = 00100000 ] && [ $((16#${range#*-})) -ge $((0x770000)) ] || fail "free range $range: not the payload's"
 cp "$nb/tools/nbmon/usbdma.c" "$vm_dir/usbdma.c"
 "$nb/tools/nbmon/payload.sh" "$vm_dir/usbdma.c" 100000 > /dev/null || fail "payload.sh"
-[ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt 65536 ] || fail "payload over 64 KB: it would reach its DMA area"
+[ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt $((0xfff0)) ] || fail "payload over 64 KB - 16: it would reach its knobs"
 nbmon load "$vm_dir/usbdma.bin" 100000 || fail "load"
+nbmon cmd wl 10fff0 0 0 0 || fail "knobs"
 crc=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65536)))' "$vm_dir/usb.img")
 out=$(nbmon call 100000 14) || fail "call: $(tail -n 4 "$vm/nbmon.log")"
 [ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$" <<< "$out")" = 20 ] && [ "$(tail -n 1 <<< "$out")" = 00000000 ] \
@@ -71,9 +73,13 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
   && grep -q "^  O qTD CBW out+40 6a6a0040 -> 6a6b0040 x1$" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
   || fail "overrun guards self-test: changed guard not reported: $out"
 clean_run 2080000a "EHCI" " F 0" 10
+nbmon cmd wl 10fff0 2 2 1 || fail "knobs"
+clean_run 6080000a "EHCI" " F 0$irqs" 10
+grep -q "unlink: IAA x2, ASYNCLISTADDR off the slot, then 2 ms" <<< "$out" || fail "knobs not read: $out"
+nbmon cmd wl 10fff0 0 0 0 || fail "knobs"
 clean_run 6480000a "EHCI" " W 0 F 0$irqs" 10 "[0-9a-f]*"
 out=$(nbmon call 100000 a0800003) || fail "unlink self-test call: $(tail -n 4 "$vm/nbmon.log")"
-grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1$" <<< "$out" \
+grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 +0.0 ms$" <<< "$out" \
   && grep -Eq "^  F slot [0-9]+\+18 f4e[0-9a-f]{5} -> f4e[0-9a-f]{5} x1$" <<< "$out" \
   && [ "$(tail -n 1 <<< "$out")" = 00000003 ] || fail "unlink self-test: write into a freed slot not reported: $out"
 vm_stop

@@ -26,6 +26,9 @@
       of 16 slots (3 QHs, its qTDs), linked after the head, unlinked after the transfer with the IAA doorbell (its
       interrupt with bit 30), then filled with a guard pattern at once; every freed slot is checked after each
       transfer and 5 ms after the last: "F n" and a line per changed place (slot, offset, old -> new, count);
+      Knobs in RAM (wl before call): 0010FFF0 ms of delay after IAA before freeing (0-1000), 0010FFF4 IAA doorbells
+      (0: 1, up to 16), 0010FFF8 nonzero: wait until ASYNCLISTADDR (the HC's current QH) is off the slot. Each freed
+      slot is polled every 0.1 ms for 10 ms: "+t ms" after IAA of the first change ("late": found later);
    16-22 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
 #include "nbmon_api.h"
 
@@ -77,6 +80,7 @@ static const struct nbmon_api *Api;
 static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
 static int Shared, GuardInject, Write, Wbinvd, Overrun, OverrunInject, NOverruns, Unlink, FreedInject, CurSlot;
 static int Freed[NSLOTS];
+static uint32_t KnobDelay, KnobCycles, KnobAsync, FirstStray = ~0u;
 static volatile int IaaSeen;
 static const char *StageName, *Label[16];
 static uint32_t OverrunChanged, FreedChanged;
@@ -559,8 +563,6 @@ freed_slot(int slot, int check)
 static void
 freed_check(void)
 {
-    if (FreedInject)
-        *mmio(SLOT(CurSlot) + 0x18) ^= 0x10000, FreedInject = 0;
     for (int slot = 0; slot < NSLOTS; slot++)
         if (Freed[slot])
             freed_slot(slot, 1);
@@ -699,11 +701,47 @@ queue_start(void)
     return 0;
 }
 
-/* Bit 23, as Linux: the transfer's QHs out of the running ring, the IAA doorbell, then the slot is free memory */
-static int
-ehci_unlink(void)
+static uint16_t
+pit_count(void)
 {
-    HEAD_QH[0] = (uint32_t)HEAD_QH | 2;
+    outb(0x43, 0);
+    uint16_t count = inb(0x40);
+    return count | inb(0x40) << 8;
+}
+
+static int
+slot_intact(int slot)
+{
+    for (uint32_t off = 0; off < 0x200; off += 4)
+        if (*mmio(SLOT(slot) + off) != (0xf4e00000 | slot << 12 | off))
+            return 0;
+    return 1;
+}
+
+/* The freed slot watched for 10 ms (PIT channel 0 polled): the 0.1 ms after IAA of its first change, if earlier */
+static void
+watch_slot(uint32_t since_iaa_ms)
+{
+    uint32_t period = IrqActive ? 1193 : 65536, last = pit_count(), ticks = 0, next = 0;
+    if (FreedInject)
+        *mmio(SLOT(CurSlot) + 0x18) ^= 0x10000, FreedInject = 0;
+    while (ticks < 11932) {
+        uint32_t now = pit_count();
+        ticks += (last - now + period) % period, last = now;
+        if (ticks < next)
+            continue;
+        next += 119;
+        if (!slot_intact(CurSlot)) {
+            uint32_t at = since_iaa_ms * 10 + ticks / 119;
+            FirstStray = at < FirstStray ? at : FirstStray;
+            return;
+        }
+    }
+}
+
+static int
+wait_iaa(void)
+{
     IaaSeen = 0;
     *ereg(E_CMD) |= E_IAAD;
     for (uint32_t start = now_ms(); !IaaSeen;) {
@@ -714,8 +752,25 @@ ehci_unlink(void)
         else
             idle();
     }
+    return 0;
+}
+
+/* Bit 23, as Linux: the transfer's QHs out of the running ring, the IAA doorbell, then the slot is free memory. The
+   knobs (0010FFF0-0010FFFB): more doorbells, waiting for ASYNCLISTADDR off the slot, a delay before freeing. */
+static int
+ehci_unlink(void)
+{
+    HEAD_QH[0] = (uint32_t)HEAD_QH | 2;
+    for (uint32_t i = 0; i < KnobCycles; i++)
+        if (wait_iaa())
+            return -1;
+    for (uint32_t start = now_ms(); KnobAsync && (*ereg(E_ASYNC) & ~0x1ffu) == SLOT(CurSlot);)
+        if (now_ms() - start > 20)
+            return fail("ASYNCLISTADDR stays on the freed QHs:", *ereg(E_ASYNC));
+    delay_ms(KnobDelay);
     freed_slot(CurSlot, 0);
     Freed[CurSlot] = 1;
+    watch_slot(KnobDelay);
     freed_check();
     return 0;
 }
@@ -1272,6 +1327,16 @@ run_test(uint32_t iterations, int inject, int slots)
         if (Unlink) {
             put_str(" F ");
             put_dec(freed);
+            if (freed && FirstStray == ~0u)
+                put_str(" late");
+            else if (freed) {
+                put_str(" +");
+                put_dec(FirstStray / 10);
+                put_str(".");
+                put_dec(FirstStray % 10);
+                put_str(" ms");
+            }
+            FirstStray = ~0u;
         }
         if (slots) {
             put_str(" slot ");
@@ -1311,7 +1376,17 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
         put_str(Wbinvd ? " (wbinvd after the fill)" : "");
     }
     put_str(Overrun ? ", qTD/QH overrun guards" : "");
-    put_str(Unlink ? ", Linux-style unlink" : "");
+    FirstStray = ~0u;
+    KnobDelay = *mmio(0x10fff0), KnobCycles = *mmio(0x10fff4), KnobAsync = *mmio(0x10fff8);
+    KnobDelay = KnobDelay > 1000 ? 1000 : KnobDelay, KnobCycles = KnobCycles - 1 > 15 ? 1 : KnobCycles;
+    if (Unlink) {
+        put_str(", Linux-style unlink: IAA x");
+        put_dec(KnobCycles);
+        put_str(KnobAsync ? ", ASYNCLISTADDR off the slot" : "");
+        put_str(", then ");
+        put_dec(KnobDelay);
+        put_str(" ms");
+    }
     put_str(", schedule ");
     put_hex(Dma, 8);
     put_str(", first read ");
