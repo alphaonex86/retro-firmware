@@ -15,7 +15,7 @@
       the CPU keeps rewriting the rest of those lines (guards: around the read, after each TD and the UHCI QH, the
       EHCI QHs' spare dwords 12-15, after the CSW) with a counter, before each start, while it waits and between
       the 64 KB parts of B; after each transfer the guards must hold the last value (G: the mismatches);
-   26 write+readback: the CPU fills A with a new pattern, WRITE(10) to LBA_W = 37800h + bits 16-22 * 80h (in the
+   26 write+readback: the CPU fills A with a new pattern, WRITE(10) to LBA_W = 37800h + bits 16-21 * 80h (in the
       stick's swap partition; A stays at 00120000), READ(10) back into the poisoned first-read area (A2), compared
       with A (W: the mismatches, @ the offset); A must still hold the pattern;
    25 wbinvd after the CPU fill, before the transfer;
@@ -31,7 +31,10 @@
       the freed slot polled every 0.1 ms for that many 0.1 ms ("+t ms" after IAA of the first change; "late": found
       later; FFFFFFFF: 10 ms). Freed slots are also checked while the next transfer runs, a change noted with what
       ran then (unlink, watch, between transfers, the active qTD's stage of the slot in use, end);
-   16-22 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
+      0010FFE8: the IAA timeout in ms (0: 20, up to 1000). The IAA latency (doorbell to USBSTS IAA, PIT polled,
+      no hlt) ends the run: min/avg/max, a histogram, the waits over 10 ms;
+   22 no B: the CPU leaves B alone (an idle CPU during the transfers);
+   16-21 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
 #include "nbmon_api.h"
 
 #define VT6212_EHCI 0x31041106u   /* function 2; the UHCIs are functions 0 and 1 */
@@ -82,7 +85,9 @@ static const struct nbmon_api *Api;
 static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
 static int Shared, GuardInject, Write, Wbinvd, Overrun, OverrunInject, NOverruns, Unlink, FreedInject, CurSlot;
 static int Freed[NSLOTS];
-static uint32_t KnobDelay, KnobCycles, KnobAsync, KnobWatch, FirstStray = ~0u;
+static uint32_t KnobDelay, KnobCycles, KnobAsync, KnobWatch, KnobIaaTimeout, FirstStray = ~0u;
+static uint32_t IaaWaits, IaaMin, IaaMax, IaaSum, IaaHist[8];   /* PIT ticks; bins <0.125 <1 <2 <5 <10 <20 >=20 ms, never */
+static int NoB;
 static volatile int IaaSeen;
 static const char *StageName, *Label[16];
 static uint32_t OverrunChanged, FreedChanged;
@@ -756,20 +761,66 @@ watch_slot(uint32_t since_iaa_ms)
     }
 }
 
+/* The doorbell, then IAA polled (or its interrupt) with its latency measured on PIT channel 0, no hlt */
 static int
 wait_iaa(void)
 {
+    static const uint32_t bins[6] = { 149, 1193, 2386, 5966, 11932, 23864 };
+    uint32_t period = IrqActive ? 1193 : 65536, last = pit_count(), ticks = 0;
     IaaSeen = 0;
     *ereg(E_CMD) |= E_IAAD;
-    for (uint32_t start = now_ms(); !IaaSeen;) {
+    while (!IaaSeen) {
+        uint32_t now = pit_count();
+        ticks += (last - now + period) % period, last = now;
         if (*ereg(E_STS) & E_IAA)
             *ereg(E_STS) = E_IAA, IaaSeen = 1;
-        else if (now_ms() - start > 20)
+        else if (ticks > KnobIaaTimeout * 1193) {
+            IaaHist[7]++;
             return fail("no IAA, USBSTS", *ereg(E_STS));
-        else
-            idle();
+        }
     }
+    int bin = 0;
+    while (bin < 6 && ticks >= bins[bin])
+        bin++;
+    IaaHist[bin]++;
+    IaaMin = !IaaWaits || ticks < IaaMin ? ticks : IaaMin;
+    IaaMax = ticks > IaaMax ? ticks : IaaMax;
+    IaaSum += ticks, IaaWaits++;
     return 0;
+}
+
+static void
+put_ms(const char *name, uint32_t ticks)
+{
+    uint32_t hundredths = ticks * 100 / 1193;
+    put_str(name);
+    put_dec(hundredths / 100);
+    put_str(".");
+    put_dec(hundredths / 10 % 10);
+    put_dec(hundredths % 10);
+}
+
+static void
+put_iaa_stats(void)
+{
+    static const char *const names[8] = { "; <0.125 ", ", <1 ", ", <2 ", ", <5 ", ", <10 ", ", <20 ", ", >=20 ",
+                                          ", never " };
+    put_str("usbdma: IAA ");
+    put_dec(IaaWaits);
+    put_str(" waits");
+    if (IaaWaits) {
+        put_ms(", min ", IaaMin);
+        put_ms(" avg ", IaaSum / IaaWaits);
+        put_ms(" max ", IaaMax);
+        put_str(" ms");
+    }
+    for (int i = 0; i < 8; i++) {
+        put_str(names[i]);
+        put_dec(IaaHist[i]);
+    }
+    put_str("; over 10 ms ");
+    put_dec(IaaHist[5] + IaaHist[6] + IaaHist[7]);
+    put_str("\r\n");
 }
 
 /* Bit 23, as Linux: the transfer's QHs out of the running ring, the IAA doorbell, then the slot is free memory. The
@@ -1038,6 +1089,8 @@ ehci_setup(void)
         return -1;
     *ereg(0x10) = 0;   /* CTRLDSSEGMENT */
     *ereg(E_INTR) = Irq ? (Unlink ? 0x23 : 3) : 0;
+    for (int i = 0; i < 12; i++)
+        HEAD_QH[i] = 0;
     HEAD_QH[0] = (uint32_t)HEAD_QH | 2;
     HEAD_QH[1] = 1u << 15 | 2 << 12;   /* H, high speed, no qTD: the reclamation head */
     HEAD_QH[4] = HEAD_QH[5] = 1;
@@ -1223,7 +1276,7 @@ in_b(uint32_t addr)
 static void
 fill_b(uint32_t seed)
 {
-    for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
+    for (uint32_t c = FREE_LO; !NoB && c < FREE_HI; c += CHUNK)
         if (in_b(c))
             fill(c, c + CHUNK, seed), guards(0), freed_check();
 }
@@ -1231,7 +1284,7 @@ fill_b(uint32_t seed)
 static void
 compare_b(uint32_t seed, struct diff *d)
 {
-    for (uint32_t c = FREE_LO; c < FREE_HI; c += CHUNK)
+    for (uint32_t c = FREE_LO; !NoB && c < FREE_HI; c += CHUNK)
         if (in_b(c))
             compare("B", c, c + CHUNK, 0, seed, d), guards(0), freed_check();
 }
@@ -1275,7 +1328,7 @@ transfer(int write, uint32_t lba, int fault, struct diff *b, uint32_t seed)
     uint32_t bad = 0x463450;
     while (!in_b(bad))
         bad += CHUNK;
-    if (fault)
+    if (fault && !NoB)
         *mmio(bad) ^= 0x10000;
     if (fault && Irq)
         checksum_fault();
@@ -1384,8 +1437,12 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     NOverruns = OverrunChanged = FreedChanged = CurSlot = 0;
     for (int slot = 0; slot < NSLOTS; slot++)
         Freed[slot] = 0;
-    LbaW = 0x37800 + (arg >> 16 & 0x7f) * 0x80;
-    Base = RamA = arg & 0x7f0000 && !Write ? arg & 0x7f0000 : 0x120000;
+    NoB = arg >> 22 & 1;
+    LbaW = 0x37800 + (arg >> 16 & 0x3f) * 0x80;
+    Base = RamA = arg & 0x3f0000 && !Write ? arg & 0x3f0000 : 0x120000;
+    IaaWaits = IaaMin = IaaMax = IaaSum = 0;
+    for (int i = 0; i < 8; i++)
+        IaaHist[i] = 0;
     Dma = Base + CHUNK, Ref = Base + 2 * CHUNK;
     Buf = RamA + (Shared ? 0x24 : 0), Len = READ_LEN - (Shared ? 512 : 0);
     if (Base < FREE_LO || Ref + CHUNK > FREE_HI)
@@ -1403,6 +1460,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     FirstStray = ~0u;
     KnobDelay = *mmio(0x10fff0), KnobCycles = *mmio(0x10fff4), KnobAsync = *mmio(0x10fff8), KnobWatch = *mmio(0x10fffc);
     KnobWatch = KnobWatch > 10000 ? 100 : KnobWatch;
+    KnobIaaTimeout = *mmio(0x10ffe8), KnobIaaTimeout = KnobIaaTimeout - 1 >= 1000 ? 20 : KnobIaaTimeout;
     KnobDelay = KnobDelay > 1000 ? 1000 : KnobDelay, KnobCycles = KnobCycles - 1 > 15 ? 1 : KnobCycles;
     if (Unlink) {
         put_str(", Linux-style unlink: IAA x");
@@ -1412,13 +1470,15 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
         put_dec(KnobDelay);
         put_str(" ms, watch ");
         put_dec(KnobWatch);
-        put_str(" x0.1 ms");
+        put_str(" x0.1 ms, IAA timeout ");
+        put_dec(KnobIaaTimeout);
+        put_str(" ms");
     }
     put_str(", schedule ");
     put_hex(Dma, 8);
     put_str(", first read ");
     put_hex(Ref, 8);
-    put_str(", B the rest of 00110000-0076ffff\r\n");
+    put_str(NoB ? ", no B\r\n" : ", B the rest of 00110000-0076ffff\r\n");
     for (int c = 0; c < NCOUNTS; c++)
         Count[c] = CountPrinted[c] = 0;
     Guard.n = 0;
@@ -1437,6 +1497,8 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     uint32_t freed, overruns = overrun_report(&freed);   /* those of a failed transfer, and late ones */
     if (errors != ~0u)
         errors += overruns + freed;
+    if (Unlink)
+        put_iaa_stats();
     put_str("usbdma: errors ");
     put_dec(errors);
     put_str("\r\n");

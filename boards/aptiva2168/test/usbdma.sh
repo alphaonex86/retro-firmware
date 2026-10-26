@@ -3,12 +3,12 @@
 # with a USB disk of random data: 20 iterations without an error, each read's CRC that of the image's first 64 KB;
 # its self-test (arg bit 31: one A and one B fault at iteration 2) gives 2 errors, both shown (with bit 30 also one
 # IRQ0 checksum mismatch: 3); the same 20 clean reads with interrupts (bit 30: IRQ0 and USB IRQs counted, no handler
-# error), on the EHCI at high speed (bit 29), and both; with A at 00500000 (bits 16-22), in 16 slots (bit 28), and
+# error), on the EHCI at high speed (bit 29), and both; with A at 00300000 (bits 16-21), in 16 slots (bit 28), and
 # with shared lines (bit 27: 127 blocks at A + 24h, guards intact; its self-test adds one guard fault); the same
 # with write+readback (bit 26, also with wbinvd: bit 25), its self-test flipping a byte of the read back; EHCI qTD/QH
 # overrun guards (bit 24) unchanged on reads and on writes with interrupts, its self-test changing one; the same
-# with Linux-style unlink (bit 23: no write into the freed QH/qTD slots; also with its knobs in RAM), its self-test
-# writing into one.
+# with Linux-style unlink (bit 23: no write into the freed QH/qTD slots, the IAA latency statistics; also with its
+# knobs in RAM, and without B: bit 22), its self-test writing into one.
 . "$(dirname "$(readlink -f "$0")")/../../../test/lib.sh"
 rom=$nb/out/aptiva2168.rom
 [ -f "$rom" ] || "$nb/build.sh" aptiva2168 > /dev/null || fail "build failed"
@@ -24,9 +24,9 @@ range=$(nbmon --from-start wait 120) || fail "no monitor: $(tail -n 5 "$vm/nbmon
 [ "${range%-*}" = 00100000 ] && [ $((16#${range#*-})) -ge $((0x770000)) ] || fail "free range $range: not the payload's"
 cp "$nb/tools/nbmon/usbdma.c" "$vm_dir/usbdma.c"
 "$nb/tools/nbmon/payload.sh" "$vm_dir/usbdma.c" 100000 > /dev/null || fail "payload.sh"
-[ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt $((0xfff0)) ] || fail "payload over 64 KB - 16: it would reach its knobs"
+[ "$(stat -c %s "$vm_dir/usbdma.bin")" -lt $((0xffe8)) ] || fail "payload over 64 KB - 24: it would reach its knobs"
 nbmon load "$vm_dir/usbdma.bin" 100000 || fail "load"
-nbmon cmd wl 10fff0 0 0 0 0 || fail "knobs"
+nbmon cmd wl 10ffe8 0 0 0 0 0 0 || fail "knobs"
 crc=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65536)))' "$vm_dir/usb.img")
 out=$(nbmon call 100000 14) || fail "call: $(tail -n 4 "$vm/nbmon.log")"
 [ "$(grep -c "^it [0-9]* crc $crc OK A 0 B 0$" <<< "$out")" = 20 ] && [ "$(tail -n 1 <<< "$out")" = 00000000 ] \
@@ -49,7 +49,7 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
 clean_run 40000014 "UHCI" "$irqs"
 clean_run 20000014 "EHCI" ""
 clean_run 60000014 "EHCI" "$irqs"
-clean_run 00500014 "UHCI" ""
+clean_run 00300014 "UHCI" ""
 clean_run 70000014 "EHCI" " slot [0-9a-f]*$irqs"
 [ "$(grep -o " slot [0-9a-f]*" <<< "$out" | sort -u | wc -l)" = 16 ] || fail "arg 70000014: not 16 A slots: $out"
 crc127=$(python3 -I -c 'import sys, zlib; print("%08x" % zlib.crc32(open(sys.argv[1], "rb").read(65024)))' "$vm_dir/usb.img")
@@ -73,10 +73,14 @@ grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000
   && grep -q "^  O qTD CBW out+40 6a6a0040 -> 6a6b0040 x1$" <<< "$out" && [ "$(tail -n 1 <<< "$out")" = 00000003 ] \
   || fail "overrun guards self-test: changed guard not reported: $out"
 clean_run 2080000a "EHCI" " F 0" 10
+grep -Eq "^usbdma: IAA [0-9]+ waits, min [0-9.]+ avg [0-9.]+ max [0-9.]+ ms; .*, never 0; over 10 ms 0$" <<< "$out" \
+  || fail "no IAA latency statistics: $out"
+clean_run 24c0000a "EHCI" " W 0 F 0" 10 "[0-9a-f]*"
+grep -q ", no B$" <<< "$out" || fail "no B not set: $out"
 nbmon cmd wl 10fff0 2 2 1 64 || fail "knobs"
 clean_run 6080000a "EHCI" " F 0$irqs" 10
 grep -q "unlink: IAA x2, ASYNCLISTADDR off the slot, then 2 ms, watch 100 x0.1 ms" <<< "$out" || fail "knobs not read: $out"
-nbmon cmd wl 10fff0 0 0 0 0 || fail "knobs"
+nbmon cmd wl 10ffe8 0 0 0 0 0 0 || fail "knobs"
 clean_run 6480000a "EHCI" " W 0 F 0$irqs" 10 "[0-9a-f]*"
 out=$(nbmon call 100000 a0800003) || fail "unlink self-test call: $(tail -n 4 "$vm/nbmon.log")"
 grep -q "^it 2 crc [0-9a-f]* BAD A 1 @00121234 x00000040 B 1 @00463450 x00010000 F 1 late$" <<< "$out" \
