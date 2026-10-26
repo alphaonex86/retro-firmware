@@ -19,6 +19,9 @@
       stick's swap partition; A stays at 00120000), READ(10) back into the poisoned first-read area (A2), compared
       with A (W: the mismatches, @ the offset); A must still hold the pattern;
    25 wbinvd after the CPU fill, before the transfer;
+   24 EHCI qTD/QH overrun guards: qTDs 128 bytes apart, bytes 32-127 guards, QHs 256 apart, bytes 48-175 guards, set
+      before each transfer, checked after it: "O n" and a line per changed place (its qTD stage or QH, offset,
+      old -> new, count);
    16-23 A's base in 64 KB units (0: 00120000); with bit 26, LBA_W. */
 #include "nbmon_api.h"
 
@@ -41,8 +44,8 @@
 #define CBW         (RAM_DMA + 0x1120)
 #define CSW         (RAM_DMA + 0x1160)
 #define CTL         (RAM_DMA + 0x1200)
-#define EQH(q)      ((volatile uint32_t *)(RAM_DMA + 0x1400 + 0x40 * (q)))   /* EHCI: control, bulk out, bulk in */
-#define QTDS        ((volatile struct qtd *)(RAM_DMA + 0x2000))
+/* EHCI QHs: control, bulk out, bulk in */
+#define EQH(q)      ((volatile uint32_t *)(RAM_DMA + 0x1400 + (Overrun ? 0x100 : 0x40) * (q)))
 #define CHECKED     (RAM_DMA + 0xe000)                                       /* 4 KB, summed by IRQ0 */
 #define IDT         ((volatile uint32_t *)(RAM_DMA + 0xf000))
 
@@ -64,7 +67,10 @@ struct idtr { uint16_t limit; uint32_t base; } __attribute__((packed));
 
 static const struct nbmon_api *Api;
 static uint32_t Base, RamA, Dma, Ref, Legsup[2], Buf, Len, GuardValue;
-static int Shared, GuardInject, Write, Wbinvd;
+static int Shared, GuardInject, Write, Wbinvd, Overrun, OverrunInject, NOverruns;
+static const char *StageName, *Label[16];
+static uint32_t OverrunChanged;
+static struct overrun { const char *where; uint32_t offset, old, now, count; } Overruns[16];
 static uint32_t LbaW;
 static uint16_t UhciIo[2], Io, PortReg;
 static uint32_t EhciOp, EhciPort, Tag, ChecksumRef;
@@ -418,6 +424,12 @@ td_at(int i)
     return (volatile struct td *)(RAM_DMA + 0x2000 + i * (Shared ? 32 : 16));
 }
 
+static volatile struct qtd *
+qtd_at(int i)
+{
+    return (volatile struct qtd *)(RAM_DMA + 0x2000 + i * (Overrun ? 128 : 32));
+}
+
 /* A word unlike want, added to d; the first 4 printed. */
 static void
 note(const char *name, uint32_t addr, uint32_t got, uint32_t want, struct diff *d)
@@ -460,13 +472,74 @@ guards(int check)
     guard_range(Buf - 4, 1, check);
     guard_range(Buf + Len, (32 - (Buf + Len) % 32) / 4, check);
     guard_range(CSW + 16, 4, check);
-    for (int q = 0; Ehci && q < 3; q++)
+    for (int q = 0; Ehci && !Overrun && q < 3; q++)
         guard_range((uint32_t)EQH(q) + 48, 4, check);
     if (Ehci)
         return;
     guard_range((uint32_t)QH + 8, 6, check);
     for (int i = 0; i < NTd; i++)
         guard_range((uint32_t)td_at(i) + 16, 4, check);
+}
+
+/****************************************************************
+ * qTD/QH overrun guards (arg bit 24, EHCI)
+ ****************************************************************/
+
+static void
+overrun_range(uint32_t base, uint32_t from, uint32_t to, const char *where, int check)
+{
+    for (uint32_t off = from; off < to; off += 4) {
+        uint32_t old = 0x6a6a0000 | off, now = *mmio(base + off);
+        if (!check)
+            *mmio(base + off) = old;
+        else if (now != old) {
+            int i = 0;
+            OverrunChanged++;
+            while (i < NOverruns && (Overruns[i].where != where || Overruns[i].offset != off))
+                i++;
+            if (i == NOverruns && NOverruns < 16)
+                Overruns[NOverruns++] = (struct overrun){ where, off, old, now, 0 };
+            if (i < 16)
+                Overruns[i].count++;
+        }
+    }
+}
+
+/* Set the guards after the QHs' 48 bytes and the qTDs' 32 bytes, or check them */
+static void
+overrun_guards(int check)
+{
+    static const char *const qh_names[3] = { "QH control", "QH bulk out", "QH bulk in" };
+    if (!Overrun)
+        return;
+    if (check && OverrunInject)
+        *mmio((uint32_t)qtd_at(0) + 0x40) ^= 0x10000, OverrunInject = 0;
+    for (int q = 0; q < 3; q++)
+        overrun_range((uint32_t)EQH(q), 48, 176, qh_names[q], check);
+    for (int i = 0; i < NTd; i++)
+        overrun_range((uint32_t)qtd_at(i), 32, 128, Label[i], check);
+}
+
+/* The changed guards since the last report, one line per place; returns their count */
+static uint32_t
+overrun_report(void)
+{
+    uint32_t changed = OverrunChanged;
+    for (int i = 0; i < NOverruns; i++) {
+        put_str("  O ");
+        put_str(Overruns[i].where);
+        put_str("+");
+        put_hex(Overruns[i].offset, 2);
+        put_str(" ");
+        put_hex(Overruns[i].old, 8);
+        put_str(" -> ");
+        put_hex(Overruns[i].now, 8);
+        put_str(" x");
+        put_dec(Overruns[i].count);
+        put_str("\r\n");
+    }
+    NOverruns = OverrunChanged = 0;
+    return changed;
 }
 
 /****************************************************************
@@ -489,7 +562,8 @@ td_add(int pid, int ep, int toggle, uint32_t buf, int len, int ioc)
 static void
 qtd_add(int q, int pid, int toggle, uint32_t buf, uint32_t len, int ioc)
 {
-    volatile struct qtd *t = &QTDS[NTd];
+    volatile struct qtd *t = qtd_at(NTd);
+    Label[NTd] = StageName;
     t->next = t->alt = 1;
     t->token = (uint32_t)toggle << 31 | len << 16 | (ioc ? Q_IOC : 0) | 3 << 10
                | (pid == PID_OUT ? 0 : pid == PID_IN ? 1 : 2) << 8 | Q_ACTIVE;
@@ -498,7 +572,7 @@ qtd_add(int q, int pid, int toggle, uint32_t buf, uint32_t len, int ioc)
     if (First[q] < 0)
         First[q] = NTd;
     else
-        QTDS[Last[q]].next = (uint32_t)t;
+        qtd_at(Last[q])->next = (uint32_t)t;
     Last[q] = NTd++;
 }
 
@@ -536,7 +610,7 @@ ehci_qh_init(int q)
     qh[1] = (q ? 0 : 1u << 15 | 1u << 14) | (uint32_t)(q ? MpsBulk : Mps0) << 16 | 2 << 12 | ep << 8 | Addr;
     qh[2] = 1u << 30;
     qh[3] = 0;
-    qh[4] = First[q] < 0 ? 1 : (uint32_t)&QTDS[First[q]];
+    qh[4] = First[q] < 0 ? 1 : (uint32_t)qtd_at(First[q]);
     qh[5] = 1;
     qh[6] = (uint32_t)(q == 1 ? ToggleOut : q == 2 ? ToggleIn : 0) << 31;
     for (int i = 7; i < 12; i++)
@@ -558,6 +632,7 @@ queue_start(void)
         return QH[1] = (uint32_t)td_at(0), 0;
     for (int q = 0; q < 3; q++)
         ehci_qh_init(q);
+    overrun_guards(0);
     return ehci_async(1);
 }
 
@@ -592,7 +667,7 @@ ehci_wait(uint32_t timeout_ms)
 {
     uint32_t start = now_ms();
     for (int i = 0; i < NTd;) {
-        uint32_t token = QTDS[i].token;
+        uint32_t token = qtd_at(i)->token;
         if (token & Q_HALTED)
             return fail("qTD error, token", token);
         if (!(token & Q_ACTIVE) && (token >> 16 & 0x7fff))
@@ -600,7 +675,7 @@ ehci_wait(uint32_t timeout_ms)
         if (!(token & Q_ACTIVE))
             i++;
         else if (now_ms() - start > timeout_ms)
-            return fail("timeout at qTD", (uint32_t)&QTDS[i]), fail("its token", token);
+            return fail("timeout at qTD", (uint32_t)qtd_at(i)), fail("its token", token);
         else
             idle();
     }
@@ -618,7 +693,9 @@ queue_wait(uint32_t timeout_ms)
         guards(1);
     if (!Ehci)
         return r;
-    if (ehci_async(0))
+    int stopped = ehci_async(0);
+    overrun_guards(1);
+    if (stopped)
         return -1;
     ToggleOut = EQH(1)[6] >> 31, ToggleIn = EQH(2)[6] >> 31;
     return r;
@@ -631,6 +708,7 @@ control(int type, int request, int value, int len)
     int in = type & 0x80, toggle = 0;
     s[0] = type, s[1] = request, s[2] = value, s[3] = value >> 8, s[4] = s[5] = 0, s[6] = len, s[7] = len >> 8;
     queue_reset();
+    StageName = "qTD control";
     stage(PID_SETUP, 0, &toggle, SETUP, 8);
     toggle = 1;
     if (len)
@@ -657,11 +735,14 @@ scsi_start(const uint8_t *cdb, int cdb_len, uint32_t buf, uint32_t len)
     for (int i = 0; i < cdb_len; i++)
         c[15 + i] = cdb[i];
     queue_reset();
+    StageName = "qTD CBW out";
     stage(PID_OUT, EpOut, &ToggleOut, CBW, 31);
+    StageName = c[12] ? "qTD data in" : "qTD data out";
     if (len && !c[12])
         stage(PID_OUT, EpOut, &ToggleOut, buf, len);
     else if (len)
         stage(PID_IN, EpIn, &ToggleIn, buf, len);
+    StageName = "qTD CSW in";
     stage(PID_IN, EpIn, &ToggleIn, CSW, 13);
     return queue_start();
 }
@@ -1056,7 +1137,7 @@ run_test(uint32_t iterations, int inject, int slots)
         uint32_t off = Shared ? 0x24 : 0, a_buf = RamA + off, pattern = 0xdeadbeef ^ it * 0x9e3779b9u;
         Buf = a_buf;
         a.n = b.n = w.n = 0;
-        GuardInject = inject && it == 1;
+        GuardInject = OverrunInject = inject && it == 1;
         fill(RamA, RamA + READ_LEN, pattern);   /* a read must replace it; a write sends it, Modified in L1 */
         if (Wbinvd)
             __asm__ volatile("wbinvd" : : : "memory");
@@ -1087,7 +1168,8 @@ run_test(uint32_t iterations, int inject, int slots)
         if (!Write)
             compare("A", Buf, Buf + Len, Ref, 0, &a);
         int bad = Write ? a.n || w.n : crc != ref;
-        errors += a.n + b.n + w.n + (!Write && !a.n && bad) + Guard.n;
+        uint32_t overruns = overrun_report();   /* the first one has those of the setup */
+        errors += a.n + b.n + w.n + (!Write && !a.n && bad) + Guard.n + overruns;
         put_str("it ");
         put_dec(it + 1);
         put_str(" crc ");
@@ -1099,6 +1181,10 @@ run_test(uint32_t iterations, int inject, int slots)
             put_diff(" W ", &w);
         if (Shared)
             put_diff(" G ", &Guard), Guard.n = 0;   /* the first one has those of the setup */
+        if (Overrun) {
+            put_str(" O ");
+            put_dec(overruns);
+        }
         if (slots) {
             put_str(" slot ");
             put_hex(RamA, 8);
@@ -1117,6 +1203,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
     if ((uint32_t)usbdma < 0x100000 || (uint32_t)usbdma + 0x10000 > FREE_LO)
         return fail("load at 00100000, not", (uint32_t)usbdma), ~0u;
     Irq = arg >> 30 & 1, Ehci = arg >> 29 & 1, Shared = arg >> 27 & 1, Write = arg >> 26 & 1, Wbinvd = arg >> 25 & 1;
+    Overrun = Ehci && arg >> 24 & 1, NOverruns = OverrunChanged = 0;
     LbaW = 0x37800 + (arg >> 16 & 0xff) * 0x80;
     Base = RamA = arg & 0xff0000 && !Write ? arg & 0xff0000 : 0x120000;
     Dma = Base + CHUNK, Ref = Base + 2 * CHUNK;
@@ -1132,6 +1219,7 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
         put_hex(LbaW, 8);
         put_str(Wbinvd ? " (wbinvd after the fill)" : "");
     }
+    put_str(Overrun ? ", qTD/QH overrun guards" : "");
     put_str(", schedule ");
     put_hex(Dma, 8);
     put_str(", first read ");
@@ -1149,6 +1237,9 @@ usbdma(uint32_t arg, const struct nbmon_api *api)
         errors = setup_stick() ? ~0u : run_test(arg & 0xffff, arg >> 31, arg >> 28 & 1);
     irq_off();
     teardown();
+    uint32_t overruns = overrun_report();   /* those of a failed transfer */
+    if (errors != ~0u)
+        errors += overruns;
     put_str("usbdma: errors ");
     put_dec(errors);
     put_str("\r\n");
