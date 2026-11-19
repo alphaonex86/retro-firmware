@@ -9,6 +9,7 @@ specific (setup utility, USB, PXE, ATA/LBA48, optional AT keyboard, POST codes, 
 | [Biostar MB-8433UUD-A](boards/mb8433uud/README.md) | 486/Am5x86, UMC UM8881F + UM8886BF | mb-8433UUD (coreboot + SeaBIOS), flashed on the real board | `84xxuuda` |
 | [IBM Aptiva A90 (2168)](boards/aptiva2168/README.md) | Pentium P54C, OPTi Viper-M | port in progress (coreboot boots to SeaBIOS in 86Box, no SeaBIOS board code yet; the IBM BIOS runs in 86Box too) | `aptiva2168` |
 | [ASUS P3B-F](boards/p3bf/README.md) | Pentium II/III (Slot 1), Intel 440BX | mainline coreboot (asus/p2b) + SeaBIOS, 256 KiB | `p3bf` |
+| [ao486 FPGA core](boards/ao486/README.md) | ao486 soft 486 on a Terasic DE25-Standard, ISA PC | SeaBIOS alone, 128 KiB, loaded by the core's HPS daemon | none (QEMU `isapc`) |
 
 ## Layout
 
